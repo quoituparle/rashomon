@@ -1,0 +1,33 @@
+{
+  "statement": "AUDIT-ONLY copy of spsc_queue_nb with scenarios set to readerwriterqueue's exact capacities. Not admitted, not shipped. One producer and one consumer call push/pop concurrently, each call made once (no retry loops in the harness). Every SUCCESSFUL operation can be explained by ONE sequential FIFO executed in some order that respects each thread's own order; a failed push/pop under contention may be spurious (each side may act on a stale view of the other's index: with acquire/release indices the producer can see 'full' and the consumer 'empty' at once, which no single order explains); afterwards the queue holds exactly the values not yet popped, in FIFO order; no data race; every operation returns. Run alone afterwards, the queue holds exactly CAP items, fails on full/empty, and stays FIFO across wrap-around.",
+  "contract": "template<unsigned CAP> struct Queue { bool push(int v); bool pop(int& out); };  single producer, single consumer, non-blocking.",
+  "harness": "../mpmc_queue/harness.cpp",
+  "instantiate": "template struct Queue<5>;",
+  "liveness": "termination",
+  "scenarios": [
+    {
+      "MO_CAP": 5,
+      "MO_P": 1,
+      "MO_PK": 6,
+      "MO_C": 1,
+      "MO_CK": 4
+    },
+    {
+      "MO_CAP": 5,
+      "MO_P": 1,
+      "MO_PK": 8,
+      "MO_C": 1,
+      "MO_CK": 6
+    }
+  ],
+  "scenario_rule": "pushes exceed CAP so the queue fills and wraps; a non-power-of-two capacity (3)",
+  "challenge_scenarios": [],
+  "references": [
+    "refs/queue_ok.hpp"
+  ],
+  "survivor_annotations": [],
+  "note": "Same property as spsc_queue, checked without busy-wait loops, for implementations whose retry path writes (e.g. cached indices), which GenMC cannot prune.",
+  "defines": {
+    "MO_SPURIOUS_FAIL": 1
+  }
+}

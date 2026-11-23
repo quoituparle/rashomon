@@ -1,0 +1,11 @@
+// Tool-owned GenMC-only shim for <functional>: std::invoke only.
+#pragma once
+#include <bits/invoke.h>
+#include <type_traits>
+namespace std {
+template <typename _Callable, typename... _Args>
+constexpr invoke_result_t<_Callable, _Args...> invoke(_Callable &&__fn, _Args &&...__args) noexcept(
+    is_nothrow_invocable_v<_Callable, _Args...>) {
+	return std::__invoke(std::forward<_Callable>(__fn), std::forward<_Args>(__args)...);
+}
+} // namespace std

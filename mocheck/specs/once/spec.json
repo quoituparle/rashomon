@@ -1,0 +1,37 @@
+{
+  "statement": "T threads race to call once.call(init), possibly repeatedly; init runs exactly once in total, and every call returns only after init has finished, seeing everything it wrote (no data race); no thread is stuck forever.",
+  "contract": "struct Once { void call(void (*fn)()); };  default-constructible; fn does not throw and does not call this Once again.",
+  "liveness": "genmc",
+  "scenarios": [
+    {
+      "MO_T": 2,
+      "MO_K": 1
+    },
+    {
+      "MO_T": 2,
+      "MO_K": 2
+    },
+    {
+      "MO_T": 3,
+      "MO_K": 1
+    }
+  ],
+  "scenario_rule": "two and three racing callers, and repeated calls (K = 2) so the fast path is exercised concurrently",
+  "challenge_scenarios": [
+    {
+      "MO_T": 3,
+      "MO_K": 2
+    }
+  ],
+  "references": [
+    "refs/once_ref.hpp"
+  ],
+  "survivor_annotations": [
+    {
+      "ref": "refs/once_ref.hpp",
+      "mutant": "L9:C48 constant 2 -> 3",
+      "status": "equivalent",
+      "why": "disables the fast path (state is never 3): every call falls through to the CAS, which fails once init has started, and the waiting loop then returns as soon as an acquire load sees 'done'. Same results with the same synchronization, just slower; the fast path is only an optimisation"
+    }
+  ]
+}

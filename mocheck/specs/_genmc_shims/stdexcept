@@ -1,0 +1,23 @@
+// Tool-owned GenMC-only shim for <stdexcept>: the exception types, without <string>
+// (GenMC's C library lacks what libstdc++'s <string> needs). Messages are dropped.
+#pragma once
+#include <exception>
+namespace std {
+#define MOCHECK_EXC(name, base)                                                                    \
+	struct name : base {                                                                           \
+		name() noexcept {}                                                                         \
+		explicit name(const char *) noexcept {}                                                    \
+		template <class S> explicit name(const S &) noexcept {}                                    \
+		const char *what() const noexcept override { return #name; }                               \
+	};
+MOCHECK_EXC(logic_error, exception)
+MOCHECK_EXC(runtime_error, exception)
+MOCHECK_EXC(invalid_argument, logic_error)
+MOCHECK_EXC(length_error, logic_error)
+MOCHECK_EXC(out_of_range, logic_error)
+MOCHECK_EXC(domain_error, logic_error)
+MOCHECK_EXC(overflow_error, runtime_error)
+MOCHECK_EXC(range_error, runtime_error)
+MOCHECK_EXC(underflow_error, runtime_error)
+#undef MOCHECK_EXC
+} // namespace std

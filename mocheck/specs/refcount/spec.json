@@ -1,0 +1,43 @@
+{
+  "contract": "template<unsigned BITS> struct RefCount { void acquire(); bool release(); };  starts at 1; acquire() is only called by a thread that already holds a reference; release() returns true exactly when the caller dropped the last reference and must destroy the object.",
+  "instantiate": "template struct RefCount<3>; template struct RefCount<32>;",
+  "harness_note": "the workers' writes to the object are plain ints, so the destroyer missing a happens-before edge is a data race",
+  "liveness": "termination",
+  "statement": "Main and T worker threads share an object; each worker writes its part while holding a reference, may clone and drop extra references, then releases. Exactly one release reports 'last'; that release sees every write made before any release; nobody touches the object after it is freed; no data race; every operation returns.",
+  "scenarios": [
+    {
+      "MO_BITS": 32,
+      "MO_T": 2,
+      "MO_K": 0
+    },
+    {
+      "MO_BITS": 32,
+      "MO_T": 2,
+      "MO_K": 1
+    },
+    {
+      "MO_BITS": 32,
+      "MO_T": 3,
+      "MO_K": 0
+    }
+  ],
+  "scenario_rule": "at least one scenario with reference cloning (K >= 1) and one with three workers",
+  "challenge_scenarios": [
+    {
+      "MO_BITS": 32,
+      "MO_T": 3,
+      "MO_K": 1
+    },
+    {
+      "MO_BITS": 32,
+      "MO_T": 2,
+      "MO_K": 2
+    }
+  ],
+  "references": [
+    "refs/refcount_std.hpp",
+    "refs/refcount_acqrel.hpp"
+  ],
+  "survivor_annotations": [],
+  "liveness_note": "non-blocking contract; GenMC's spin-loop liveness heuristic misreports CAS retry loops, so termination is checked instead"
+}

@@ -1,0 +1,14 @@
+{
+  "statement": "N worker threads each write their own data and then count_down() once; waiter threads call wait(). wait() returns only after all N count_downs and then sees everything the workers wrote before counting down (no data race); once open, wait() returns at once; no thread is stuck forever.",
+  "contract": "struct Latch { explicit Latch(int n); void count_down(); void wait(); };  single use; count_down is called exactly n times in total.",
+  "liveness": "genmc",
+  "scenarios": [
+    {"MO_N": 2, "MO_WAITERS": 1},
+    {"MO_N": 3, "MO_WAITERS": 1},
+    {"MO_N": 2, "MO_WAITERS": 2}
+  ],
+  "scenario_rule": "at least three workers (so an early count_down's writes must travel through a later RMW) and two waiters",
+  "challenge_scenarios": [{"MO_N": 3, "MO_WAITERS": 2}],
+  "references": ["refs/latch_ref.hpp"],
+  "survivor_annotations": []
+}

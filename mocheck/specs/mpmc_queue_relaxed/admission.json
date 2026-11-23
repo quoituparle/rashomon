@@ -1,0 +1,52 @@
+{
+  "verdict": "ADMITTED",
+  "spec": "mpmc_queue_relaxed",
+  "spec_digest": "89a84d236a1f58aa6eae2df065739a1aa8f1ca555cdc757bad6452496ef35de1",
+  "admitted_at": "2026-11-23T13:11:46-0500",
+  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.1",
+  "memory_model": "RC11",
+  "references": {
+    "refs/mpmc_vyukov.hpp": {
+      "mutants": 35,
+      "summary": "killed 30, survived 5, unknown 0, stillborn 0   mutation score 86%",
+      "survivors": [
+        {
+          "mutant": "L12:C21 constant 0 -> 1",
+          "verdict": "SURVIVED",
+          "note": "equivalent: skips the explicit store of 0 into cells[0].seq; since C++20 std::atomic's default constructor value-initialises, the cell already holds 0"
+        },
+        {
+          "mutant": "L29:C19 operator '<' -> '<='",
+          "verdict": "SURVIVED",
+          "note": "equivalent: the preceding branch already handles dif == 0, so in this else-if 'dif < 0', 'dif <= 0' and 'dif < 1' select exactly the same values (push)"
+        },
+        {
+          "mutant": "L29:C21 constant 0 -> 1",
+          "verdict": "SURVIVED",
+          "note": "equivalent: the preceding branch already handles dif == 0, so in this else-if 'dif < 0', 'dif <= 0' and 'dif < 1' select exactly the same values (push)"
+        },
+        {
+          "mutant": "L50:C19 operator '<' -> '<='",
+          "verdict": "SURVIVED",
+          "note": "equivalent: the preceding branch already handles dif == 0, so in this else-if 'dif < 0', 'dif <= 0' and 'dif < 1' select exactly the same values (pop)"
+        },
+        {
+          "mutant": "L50:C21 constant 0 -> 1",
+          "verdict": "SURVIVED",
+          "note": "equivalent: the preceding branch already handles dif == 0, so in this else-if 'dif < 0', 'dif <= 0' and 'dif < 1' select exactly the same values (pop)"
+        }
+      ]
+    },
+    "refs/mpmc_locked.hpp": {
+      "mutants": 16,
+      "summary": "killed 15, survived 1, unknown 0, stillborn 0   mutation score 94%",
+      "survivors": [
+        {
+          "mutant": "L5:C18 constant 0 -> 1",
+          "verdict": "SURVIVED",
+          "note": "equivalent: initial ring offset head=1 instead of 0; every index is taken modulo CAP and the contract requires CAP >= 2, so the observable behaviour is identical"
+        }
+      ]
+    }
+  }
+}

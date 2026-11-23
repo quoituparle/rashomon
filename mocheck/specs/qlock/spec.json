@@ -1,0 +1,14 @@
+{
+  "statement": "T threads each do K critical sections that increment a plain int, each time passing a fresh queue node from their own stack; the final count is T*K, critical sections never overlap (no data race), and no thread is stuck forever. Run alone first, lock/unlock works and is repeatable.",
+  "contract": "struct QLock { struct Node; void lock(Node& n); void unlock(Node& n); };  default-constructible and unlocked; Node is default-constructible and must stay alive from lock(n) until unlock(n) returns; the same node is passed to lock and unlock.",
+  "liveness": "genmc",
+  "scenarios": [
+    {"MO_T": 2, "MO_K": 1},
+    {"MO_T": 2, "MO_K": 2},
+    {"MO_T": 3, "MO_K": 1}
+  ],
+  "scenario_rule": "re-acquisition (K >= 2) and three contenders (a queue of length >= 2)",
+  "challenge_scenarios": [{"MO_T": 3, "MO_K": 2}],
+  "references": ["refs/mcs.hpp"],
+  "survivor_annotations": []
+}

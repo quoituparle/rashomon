@@ -1,0 +1,67 @@
+{
+  "statement": "Several producers push distinct values and several consumers pop concurrently; every observed result can be explained by ONE sequential bounded FIFO of capacity CAP executed in some order that respects each thread's own order (push fails only when full, pop fails only when empty); afterwards the queue holds exactly the values not yet popped, in FIFO order; no data race; no thread stuck forever. Run alone afterwards, the queue holds exactly CAP items, fails (and returns) on full/empty, and stays FIFO across wrap-around.",
+  "contract": "template<unsigned CAP> struct Queue { bool push(int v); bool pop(int& out); };  non-blocking: return false instead of waiting. CAP >= 2.",
+  "scenarios": [
+    {
+      "MO_CAP": 2,
+      "MO_P": 2,
+      "MO_PK": 1,
+      "MO_C": 2,
+      "MO_CK": 1
+    },
+    {
+      "MO_CAP": 2,
+      "MO_P": 2,
+      "MO_PK": 2,
+      "MO_C": 1,
+      "MO_CK": 3
+    },
+    {
+      "MO_CAP": 2,
+      "MO_P": 1,
+      "MO_PK": 3,
+      "MO_C": 2,
+      "MO_CK": 2
+    },
+    {
+      "MO_CAP": 3,
+      "MO_P": 2,
+      "MO_PK": 2,
+      "MO_C": 1,
+      "MO_CK": 3
+    }
+  ],
+  "scenario_rule": "every scenario has >= 2 producers or >= 2 consumers; total pushes exceed CAP in at least one scenario per capacity; capacities include a non-power-of-two (3), because modulo 2 hides index-direction bugs (found by `mocheck mutate`)",
+  "consistency": "sequential consistency of the object w.r.t. per-thread order (plus join happens-before for the drain); weaker than real-time linearizability, which has no clean definition under weak memory without imposing extra synchronization",
+  "liveness": "termination",
+  "liveness_note": "GenMC's spin-loop liveness heuristic misreports lock-free retry loops (e.g. Vyukov) as livelocks, so this spec checks termination instead: every execution must be able to complete, and the solo phase forces the full/empty failure paths to return.",
+  "note": "Strict: a failure must be justified by a moment when the queue really was full/empty. Vyukov's queue does NOT meet this (see mpmc_queue_relaxed).",
+  "instantiate": "template struct Queue<2>;",
+  "references": [
+    "refs/mpmc_locked.hpp"
+  ],
+  "challenge_scenarios": [
+    {
+      "MO_CAP": 4,
+      "MO_P": 1,
+      "MO_PK": 5,
+      "MO_C": 2,
+      "MO_CK": 2
+    },
+    {
+      "MO_CAP": 3,
+      "MO_P": 2,
+      "MO_PK": 2,
+      "MO_C": 2,
+      "MO_CK": 2
+    }
+  ],
+  "survivor_annotations": [
+    {
+      "ref": "refs/mpmc_locked.hpp",
+      "mutant": "L5:C18 constant 0 -> 1",
+      "status": "equivalent",
+      "why": "initial ring offset head=1 instead of 0; every index is taken modulo CAP and the contract requires CAP >= 2, so the observable behaviour is identical"
+    }
+  ]
+}

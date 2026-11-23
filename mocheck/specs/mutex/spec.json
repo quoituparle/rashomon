@@ -1,0 +1,31 @@
+{
+  "statement": "T threads each do K critical sections that increment a plain int; the final count is T*K, critical sections never overlap (no data race), and no thread is stuck forever. Run alone first, lock/unlock works and is repeatable.",
+  "contract": "struct Mutex { void lock(); void unlock(); };  default-constructible, starts unlocked.",
+  "scenarios": [
+    {
+      "MO_T": 2,
+      "MO_K": 1
+    },
+    {
+      "MO_T": 2,
+      "MO_K": 2
+    },
+    {
+      "MO_T": 3,
+      "MO_K": 1
+    }
+  ],
+  "scenario_rule": "at least one scenario with re-acquisition (K >= 2) and one with 3 contenders",
+  "liveness": "genmc",
+  "references": [
+    "refs/mutex_cas.hpp",
+    "refs/mutex_ticket.hpp"
+  ],
+  "challenge_scenarios": [
+    {
+      "MO_T": 3,
+      "MO_K": 2
+    }
+  ],
+  "survivor_annotations": []
+}

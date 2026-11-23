@@ -1,0 +1,14 @@
+// mocheck GenMC shim: the real <chrono> pulls <string>, whose libstdc++ body needs a libc GenMC lacks.
+// Only the duration vocabulary needed to *declare* timed-wait APIs is provided; using it is unsupported.
+#pragma once
+#include <ratio>
+namespace std { namespace chrono {
+template <class Rep, class Period = std::ratio<1>> struct duration {
+    using rep_type = Rep; using period_type = Period; Rep r{}; constexpr duration() = default; constexpr explicit duration(Rep v) : r(v) {}
+    constexpr Rep count() const { return r; }
+};
+using microseconds = duration<long long, std::micro>;
+template <class To, class Rep, class Period> constexpr To duration_cast(const duration<Rep, Period>& d) {
+    return To(static_cast<typename To::rep_type>(d.count() * Period::num * To::period_type::den / (Period::den * To::period_type::num)));
+}
+}}

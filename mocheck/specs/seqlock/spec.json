@@ -1,0 +1,80 @@
+{
+  "statement": "One writer publishes (k, 7k) for increasing k while readers call try_read concurrently. A successful read returns a pair that was actually written (never torn), not older than what the reader is guaranteed to see, never going backwards for the same reader; try_read may fail while a write overlaps. Run alone, reads succeed and see the latest write. No data race — the payload must be atomic (relaxed is fine); the classic plain-memory seqlock is undefined behaviour in C++ and is rejected. Premise: fewer than 2^(BITS-1) writes overlap one read (otherwise the counter wraps to the same value and no seqlock can tell).",
+  "contract": "template<unsigned BITS> struct SeqLock { void write(int a, int b); bool try_read(int& a, int& b); };  single writer; the sequence counter must wrap at 2^BITS (BITS = 32 in production, shrunk for verification); initial payload (0, 0).",
+  "instantiate": "template struct SeqLock<3>; template struct SeqLock<32>;",
+  "liveness": "termination",
+  "scenarios": [
+    {
+      "MO_BITS": 32,
+      "MO_PRE": 0,
+      "MO_W": 2,
+      "MO_R": 1,
+      "MO_K": 2
+    },
+    {
+      "MO_BITS": 32,
+      "MO_PRE": 0,
+      "MO_W": 1,
+      "MO_R": 2,
+      "MO_K": 1
+    },
+    {
+      "MO_BITS": 3,
+      "MO_PRE": 3,
+      "MO_W": 2,
+      "MO_R": 1,
+      "MO_K": 2
+    }
+  ],
+  "scenario_rule": "at least one scenario with two readers, one with a reader that reads twice, and one shrunk scenario whose concurrent writes cross the counter wrap-around (3-bit counter pushed to 6 by solo writes, then 6 -> 7 -> 0 -> 1 -> 2)",
+  "challenge_scenarios": [
+    {
+      "MO_BITS": 32,
+      "MO_PRE": 0,
+      "MO_W": 2,
+      "MO_R": 2,
+      "MO_K": 2
+    },
+    {
+      "MO_BITS": 32,
+      "MO_PRE": 0,
+      "MO_W": 3,
+      "MO_R": 1,
+      "MO_K": 3
+    },
+    {
+      "MO_BITS": 3,
+      "MO_PRE": 2,
+      "MO_W": 3,
+      "MO_R": 1,
+      "MO_K": 2
+    },
+    {
+      "MO_BITS": 2,
+      "MO_PRE": 1,
+      "MO_W": 1,
+      "MO_R": 2,
+      "MO_K": 1
+    }
+  ],
+  "references": [
+    "refs/seqlock_ok.hpp"
+  ],
+  "survivor_annotations": [
+    {
+      "ref": "refs/seqlock_ok.hpp",
+      "mutant": "L13:C16 operator '+' -> '-'",
+      "status": "equivalent",
+      "why": "a seqlock only needs the counter to be odd while a write is in progress and to differ from its previous value afterwards; stepping to s-1 instead of s+1 for the odd in-progress value is just as valid. Modulo 2^BITS the values stay distinct and the parity is unchanged, so the wrap-around period is the same"
+    },
+    {
+      "ref": "refs/seqlock_ok.hpp",
+      "mutant": "L17:C16 operator '+' -> '-'",
+      "status": "equivalent",
+      "why": "a seqlock only needs the counter to be odd while a write is in progress and to differ from its previous value afterwards; stepping to s-2 instead of s+2 for the final even value is just as valid (the counter counts down). Modulo 2^BITS the values stay distinct and the parity is unchanged, so the wrap-around period is the same"
+    }
+  ],
+  "shrink_params": [
+    "BITS"
+  ]
+}

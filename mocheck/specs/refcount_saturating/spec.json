@@ -1,0 +1,74 @@
+{
+  "contract": "template<unsigned BITS> struct RefCount { void acquire(); bool release(); };  starts at 1; acquire() is only called by a thread that already holds a reference; release() returns true exactly when the caller dropped the last reference and must destroy the object.",
+  "instantiate": "template struct RefCount<3>; template struct RefCount<32>;",
+  "harness_note": "the workers' writes to the object are plain ints, so the destroyer missing a happens-before edge is a data race",
+  "liveness": "termination",
+  "statement": "Main and T worker threads share an object; each worker writes its part while holding a reference, may clone and drop extra references, then releases. Exactly one release reports 'last'; that release sees every write made before any release; nobody touches the object after it is freed; no data race; every operation returns. In addition, the count honours BITS: it must hold at least 2^BITS - 2 references normally, and when more are taken it must saturate before it could wrap: after that it never reaches zero and no release reports 'last' (the object is leaked, never freed while references are alive).",
+  "harness": "../refcount/harness.cpp",
+  "shrink_params": [
+    "BITS"
+  ],
+  "scenarios": [
+    {
+      "MO_BITS": 32,
+      "MO_T": 2,
+      "MO_K": 0
+    },
+    {
+      "MO_BITS": 32,
+      "MO_T": 2,
+      "MO_K": 1
+    },
+    {
+      "MO_BITS": 2,
+      "MO_T": 1,
+      "MO_K": 0
+    },
+    {
+      "MO_BITS": 3,
+      "MO_T": 2,
+      "MO_K": 1
+    },
+    {
+      "MO_BITS": 2,
+      "MO_T": 1,
+      "MO_K": 0,
+      "MO_EXTRA": 3,
+      "MO_OVER": 1
+    }
+  ],
+  "scenario_rule": "a 2-bit scenario that uses exactly the promised capacity (2^BITS - 2 references) and must free normally, a shrunk 3-bit scenario below saturation, and overflow scenarios whose total reference count is 1 modulo 2^BITS (2-bit: 1 + 1 + 3 = 5), so that a wrapping counter lands exactly where a release reads 1 and frees the object while references are alive",
+  "challenge_scenarios": [
+    {
+      "MO_BITS": 32,
+      "MO_T": 3,
+      "MO_K": 1
+    },
+    {
+      "MO_BITS": 2,
+      "MO_T": 2,
+      "MO_K": 0,
+      "MO_EXTRA": 2,
+      "MO_OVER": 1
+    },
+    {
+      "MO_BITS": 3,
+      "MO_T": 1,
+      "MO_K": 1,
+      "MO_EXTRA": 7,
+      "MO_OVER": 1
+    }
+  ],
+  "references": [
+    "refs/refcount_sat.hpp"
+  ],
+  "survivor_annotations": [
+    {
+      "ref": "refs/refcount_sat.hpp",
+      "mutant": "L8:C62 constant 1 -> 0",
+      "status": "outside-spec",
+      "why": "moves the saturation point one value later (2^BITS instead of 2^BITS - 1). The count is stored in a full unsigned, so it still saturates before it can ever wrap: no early free is possible. The spec deliberately constrains safety (never free early, leak after overflow) and the promised minimum capacity, not the exact saturation value"
+    }
+  ],
+  "liveness_note": "non-blocking contract; GenMC's spin-loop liveness heuristic misreports CAS retry loops, so termination is checked instead"
+}

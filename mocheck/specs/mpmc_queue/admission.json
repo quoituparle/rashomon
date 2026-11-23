@@ -1,0 +1,21 @@
+{
+  "verdict": "ADMITTED",
+  "spec": "mpmc_queue",
+  "spec_digest": "575c869f86e696b840a570ec20e499a8aeadbf03bfe22f6d06241e9402fffd7b",
+  "admitted_at": "2026-11-23T13:09:34-0500",
+  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.1",
+  "memory_model": "RC11",
+  "references": {
+    "refs/mpmc_locked.hpp": {
+      "mutants": 16,
+      "summary": "killed 15, survived 1, unknown 0, stillborn 0   mutation score 94%",
+      "survivors": [
+        {
+          "mutant": "L5:C18 constant 0 -> 1",
+          "verdict": "SURVIVED",
+          "note": "equivalent: initial ring offset head=1 instead of 0; every index is taken modulo CAP and the contract requires CAP >= 2, so the observable behaviour is identical"
+        }
+      ]
+    }
+  }
+}

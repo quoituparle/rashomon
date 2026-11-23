@@ -1,0 +1,20 @@
+{
+  "verdict": "ADMITTED",
+  "spec": "refcount",
+  "spec_digest": "6ef49f7269f240e2969107f53ec714dbc0b93a511e5d79ecf2b49ab014069a72",
+  "admitted_at": "2026-11-23T13:13:40-0500",
+  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.1",
+  "memory_model": "RC11",
+  "references": {
+    "refs/refcount_std.hpp": {
+      "mutants": 13,
+      "summary": "killed 13, survived 0, unknown 0, stillborn 0   mutation score 100%",
+      "survivors": []
+    },
+    "refs/refcount_acqrel.hpp": {
+      "mutants": 14,
+      "summary": "killed 14, survived 0, unknown 0, stillborn 0   mutation score 100%",
+      "survivors": []
+    }
+  }
+}

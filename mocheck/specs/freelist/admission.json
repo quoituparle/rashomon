@@ -1,0 +1,36 @@
+{
+  "verdict": "ADMITTED",
+  "spec": "freelist",
+  "spec_digest": "2045ecbe207af8356b9261cf1f4aae3dc24414772d5a2fde9e5df18335dd8c25",
+  "admitted_at": "2026-11-23T13:16:41-0500",
+  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.1",
+  "memory_model": "RC11",
+  "references": {
+    "refs/freelist_tagged.hpp": {
+      "mutants": 42,
+      "summary": "killed 36, survived 4, unknown 0, stillborn 2   mutation score 90%",
+      "survivors": [
+        {
+          "mutant": "L7:C20 operator '<' -> '<='",
+          "verdict": "SURVIVED",
+          "note": "equivalent: compile-time guard on CAP: CAP = 0xFFFF would also fit (index + 1 <= 0xFFFF in 16 bits); no instantiation behaves differently"
+        },
+        {
+          "mutant": "L7:C39 constant 16 -> 17",
+          "verdict": "SURVIVED",
+          "note": "outside-spec: compile-time guard on TAG: it would admit TAG = 17, which the packing cannot store (one tag bit would be shifted out). Every TAG the spec runs (2, 16) behaves identically; the guard itself is not part of the concurrent behaviour under test"
+        },
+        {
+          "mutant": "L19:C19 constant 0 -> 1",
+          "verdict": "SURVIVED",
+          "note": "equivalent: initial tag 1 instead of 0: the starting value of an ABA tag is arbitrary, only the fact that it changes on every allocation matters"
+        },
+        {
+          "mutant": "L31:C53 operator '+' -> '-'",
+          "verdict": "SURVIVED",
+          "note": "equivalent: the tag counts down instead of up on each allocation; modulo 2^TAG the sequence of values is just as long before it repeats"
+        }
+      ]
+    }
+  }
+}

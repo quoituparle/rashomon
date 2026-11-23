@@ -1,0 +1,35 @@
+{
+  "statement": "One producer pushes 1..N, one consumer pops; the consumer receives exactly 1..N in order, nothing is lost or duplicated, no data race, and no thread is stuck forever. Run alone first, the queue holds exactly CAP items, fails (and returns) on full/empty, and is FIFO.",
+  "contract": "template<unsigned CAP> struct Queue { bool push(int v); bool pop(int& out); };  push returns false only when full, pop returns false only when empty.",
+  "scenarios": [
+    {
+      "MO_CAP": 1,
+      "MO_N": 3
+    },
+    {
+      "MO_CAP": 2,
+      "MO_N": 4
+    },
+    {
+      "MO_CAP": 3,
+      "MO_N": 5
+    }
+  ],
+  "scenario_rule": "N >= CAP + 2, so the queue is forced to fill, wrap around and drain at least once",
+  "liveness": "genmc",
+  "instantiate": "template struct Queue<2>;",
+  "references": [
+    "refs/queue_ok.hpp"
+  ],
+  "challenge_scenarios": [
+    {
+      "MO_CAP": 4,
+      "MO_N": 6
+    },
+    {
+      "MO_CAP": 2,
+      "MO_N": 7
+    }
+  ],
+  "survivor_annotations": []
+}

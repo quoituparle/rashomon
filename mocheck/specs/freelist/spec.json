@@ -1,0 +1,95 @@
+{
+  "statement": "A pool of CAP node indices, all free at start, shared by threads that alloc and free concurrently. A node is never owned by two threads at once; alloc never returns an index outside the pool; afterwards, run alone, the pool hands out exactly CAP distinct nodes and then reports empty (nothing lost, duplicated or corrupted); the next links must be atomic (no data race); every operation returns. Premise: fewer than 2^TAG allocations overlap one allocation (a tag that wraps all the way round cannot be told apart).",
+  "contract": "template<unsigned CAP, unsigned TAG> struct FreeList { FreeList(); int alloc(); void free(int i); };  alloc returns an index in [0, CAP) or -1 if no node is free (it may also return -1 under contention); free takes a node the caller owns. TAG is the width of the ABA tag: 16 in production, shrunk for verification.",
+  "instantiate": "template struct FreeList<2, 2>; template struct FreeList<2, 16>;",
+  "shrink_params": [
+    "TAG"
+  ],
+  "liveness": "termination",
+  "scenarios": [
+    {
+      "MO_CAP": 2,
+      "MO_TAG": 16,
+      "MO_C": 1,
+      "MO_K": 1,
+      "MO_H": 1
+    },
+    {
+      "MO_CAP": 2,
+      "MO_TAG": 16,
+      "MO_C": 2,
+      "MO_K": 1,
+      "MO_H": 0
+    },
+    {
+      "MO_CAP": 2,
+      "MO_TAG": 2,
+      "MO_PRE": 3,
+      "MO_C": 1,
+      "MO_K": 1,
+      "MO_H": 1
+    },
+    {
+      "MO_CAP": 2,
+      "MO_TAG": 2,
+      "MO_PRE": 0,
+      "MO_C": 1,
+      "MO_K": 1,
+      "MO_H": 1
+    }
+  ],
+  "scenario_rule": "a cycler racing a hoarder (the classic ABA: pop x, pop y, push x), two cyclers racing each other, and two 2-bit-tag scenarios: one starting from tag 0, one where solo alloc/free cycles first push the tag to its wrap point (3) so the concurrent part crosses it",
+  "challenge_scenarios": [
+    {
+      "MO_CAP": 3,
+      "MO_TAG": 16,
+      "MO_C": 2,
+      "MO_K": 1,
+      "MO_H": 1
+    },
+    {
+      "MO_CAP": 2,
+      "MO_TAG": 16,
+      "MO_C": 1,
+      "MO_K": 2,
+      "MO_H": 1
+    },
+    {
+      "MO_CAP": 2,
+      "MO_TAG": 1,
+      "MO_PRE": 1,
+      "MO_C": 1,
+      "MO_K": 1,
+      "MO_H": 0
+    }
+  ],
+  "references": [
+    "refs/freelist_tagged.hpp"
+  ],
+  "survivor_annotations": [
+    {
+      "ref": "refs/freelist_tagged.hpp",
+      "mutant": "L7:C20 operator '<' -> '<='",
+      "status": "equivalent",
+      "why": "compile-time guard on CAP: CAP = 0xFFFF would also fit (index + 1 <= 0xFFFF in 16 bits); no instantiation behaves differently"
+    },
+    {
+      "ref": "refs/freelist_tagged.hpp",
+      "mutant": "L7:C39 constant 16 -> 17",
+      "status": "outside-spec",
+      "why": "compile-time guard on TAG: it would admit TAG = 17, which the packing cannot store (one tag bit would be shifted out). Every TAG the spec runs (2, 16) behaves identically; the guard itself is not part of the concurrent behaviour under test"
+    },
+    {
+      "ref": "refs/freelist_tagged.hpp",
+      "mutant": "L19:C19 constant 0 -> 1",
+      "status": "equivalent",
+      "why": "initial tag 1 instead of 0: the starting value of an ABA tag is arbitrary, only the fact that it changes on every allocation matters"
+    },
+    {
+      "ref": "refs/freelist_tagged.hpp",
+      "mutant": "L31:C53 operator '+' -> '-'",
+      "status": "equivalent",
+      "why": "the tag counts down instead of up on each allocation; modulo 2^TAG the sequence of values is just as long before it repeats"
+    }
+  ]
+}

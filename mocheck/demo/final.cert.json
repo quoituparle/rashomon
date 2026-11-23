@@ -1,0 +1,57 @@
+{
+  "verdict": "PASS",
+  "impl_sha256": "09d944eaf47deae5c1fca3452c0f8b4c5d7f2e28db5ad3cb08537d9dbc92f628",
+  "spec": "mpmc_queue_relaxed",
+  "spec_digest": "6eee53dc4f9cbba7101e88f6b8c085d066c5198df81569fe2e6ac530e80f6f30",
+  "spec_admitted": true,
+  "memory_model": "RC11",
+  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.1",
+  "guarantee": "exhaustive over all executions allowed by the memory model, for the bounded scenarios listed (not an unbounded proof); side-effect-free spin iterations are pruned by GenMC's spin-assume, which is part of the trusted base",
+  "liveness": "termination",
+  "scenarios": [
+    {
+      "MO_CAP": 2,
+      "MO_P": 2,
+      "MO_PK": 1,
+      "MO_C": 2,
+      "MO_CK": 1,
+      "verdict": "pass",
+      "executions": 14,
+      "pruned_by_spin_assume": 60,
+      "seconds": 0.122
+    },
+    {
+      "MO_CAP": 2,
+      "MO_P": 2,
+      "MO_PK": 2,
+      "MO_C": 1,
+      "MO_CK": 3,
+      "verdict": "pass",
+      "executions": 234,
+      "pruned_by_spin_assume": 276,
+      "seconds": 0.922
+    },
+    {
+      "MO_CAP": 2,
+      "MO_P": 1,
+      "MO_PK": 3,
+      "MO_C": 2,
+      "MO_CK": 2,
+      "verdict": "pass",
+      "executions": 169,
+      "pruned_by_spin_assume": 140,
+      "seconds": 0.531
+    },
+    {
+      "MO_CAP": 3,
+      "MO_P": 2,
+      "MO_PK": 2,
+      "MO_C": 1,
+      "MO_CK": 3,
+      "verdict": "pass",
+      "executions": 122,
+      "pruned_by_spin_assume": 222,
+      "seconds": 0.856
+    }
+  ]
+}
