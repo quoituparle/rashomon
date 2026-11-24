@@ -1,0 +1,42 @@
+"RC11 with C++20 release sequences"
+
+(*
+ * Tool-owned memory model for the second judge (Dartagnan).
+ *
+ * Identical to Dat3M 4.5.0's cat/rc11.cat (Lahav, Vafeiadis, Kang, Hur, Dreyer,
+ * "Repairing Sequential Consistency in C/C++11", PLDI 2017; cat coding by Sicon Colin)
+ * except for the release sequence. RC11 as published keeps C++11's rule that later
+ * stores to the same location by the same thread continue a release sequence:
+ *     rs = [W]; (po & loc)?; [W & atomic]; (rf; rmw)*
+ * C++20 (P0982R1) removed that: only RMWs continue it. GenMC implements the C++20 rule,
+ * and so must the second judge, or it misses the bug in examples/ebr_relaxed_announce.hpp
+ * (a relaxed store overwriting a release store no longer publishes what preceded it).
+ *)
+
+// This is needed for herd which can create a single event for rmw instructions
+let myrmw = [RMW] | rmw
+
+let eco = (rf | co | fr)+
+let rs = [W & (RLX | REL | ACQ_REL | ACQ | SC)]; (rf; myrmw)*
+let sw = [(REL | ACQ_REL | SC)]; ([F]; po)?; rs; rf; [R & (RLX | REL | ACQ | ACQ_REL | SC)]; (po; [F])?; [(ACQ | ACQ_REL | SC)]
+let hb = (po | sw)+
+
+let pol = po \ loc
+let hbl = hb & loc
+let scb = po | pol; hb; pol | hbl | co | fr
+let pscb = ([SC] | [F & SC]; hb?); scb; ([SC] | hb? ; [F & SC])
+let pscf = [F & SC]; (hb | hb; eco; hb); [F & SC]
+let psc = pscb | pscf
+
+irreflexive hb; eco? as coherence1
+irreflexive (myrmw; eco) as coherencermw
+empty (myrmw & (fr; co)) as atomicity
+acyclic psc as SC
+acyclic (po | rf) as no-thin-air
+
+(* data_races *)
+// We treat initial events as non-atomic thus we need to explicit remove them
+let conflict = ext & ((((W * _) | (_ * W)) & loc) \ ((IW * _) | (_ * IW)))
+let race = conflict \ (A * A) \ hb \ (hb^-1)
+
+flag ~empty race as racy

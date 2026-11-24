@@ -1,10 +1,10 @@
 # mocheck 交接文档
 
-写于 2026-11-23，从云端会话转到本地。技术细节以 `mocheck/README.md` 为准，这里讲**现状、怎么跑起来、下一步做什么**。
+写于 2026-11-23，从云端会话转到本地；2026-11-24 在本地（WSL2 Ubuntu 26.04）续做了第二轮，见下面"第二轮"。技术细节以 `mocheck/README.md` 为准，这里讲**现状、怎么跑起来、下一步做什么**。
 
 ## 一句话现状
 
-C++ 内存序判官：AI 按规格写实现，mocheck 给出 PASS / FAIL（带反例）/ INCONCLUSIVE。13 个规格全部通过准入，72 项回归 0 失败。已经能当 CI 守门员用，但还算不上"Lean 级可信"，主要差在判官本身（GenMC + 我们的预处理）还不可信。下一步就是补这个洞：用 Dartagnan 交叉判决。
+C++ 内存序判官：AI 按规格写实现，mocheck 给出 PASS / FAIL（带反例）/ INCONCLUSIVE。13 个规格全部通过准入，79 项回归 0 失败（装了 Dartagnan 时；没装时 72 项）。第二轮加上了 `--second-judge dartagnan`：GenMC 判 PASS 之后，再由 Dartagnan 独立检查每个场景，两边都 PASS 才算 PASS。接入过程中发现 Dartagnan 自己也有 5 个会导致错判的问题，都已经在 mocheck 这边防住。现在的主要缺口：MPMC 类规格对 Dartagnan 来说太大，第二判官只能给 INCONCLUSIVE。
 
 ## 仓库结构
 
@@ -55,6 +55,12 @@ for s in spsc_queue_nb spsc_queue mpmc_queue mpmc_queue_relaxed seqlock mutex ql
 
 如果某个规格准入的分数和 README 表格里的不一样，先别急着改规格，大概率是 GenMC 版本或 clang 版本不同。
 
+**本机（Ubuntu 26.04）额外要注意的：**
+- `clang++-19` 会选中 GCC 16，但 GCC 16 的 libstdc++ 头文件没装，报 `'atomic' file not found`。设 `export MOCHECK_CLANG_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/14`，所有编译（包括 GenMC 内部）都会带上。
+- Dartagnan：`~/Dat3M`（tag 4.5.0，已编好）。设 `export DAT3M_HOME=~/Dat3M`。需要 Java 25（已装）。
+- 在本机实测：13 个规格的分数和 README 完全一致，准入约 5–7 分钟（4 个并行）。
+- **内存**：Dartagnan 内嵌的 SMT 求解器会在 JVM 堆之外大量占内存（`-Xmx3g` 下见过 11 GB）。并行跑两个曾经把 15 GB 的 WSL 虚拟机整个撑崩重启。mocheck 现在会监控它的常驻内存，超过 `MOCHECK_DARTAGNAN_MEM_MB`（默认 4096）就杀掉，判 INCONCLUSIVE。并行跑多个时把这个值调低。
+
 ## 这轮做了什么（按时间）
 
 1. 13 个规格 + 准入门（变异测试 + 挑战场景 + 幸存者人工标注）。
@@ -69,21 +75,33 @@ for s in spsc_queue_nb spsc_queue mpmc_queue mpmc_queue_relaxed seqlock mutex ql
 6. **抓到 GenMC 的两个可靠性漏洞并已防住**：`atomic_signal_fence` 被当成线程 fence；内联汇编的输出被当成 0。
 7. 在 Graviton2 上实测：minimize 预测 ARM 省 53%，实际 ≤ 3%。成本模型已在 README 里降级为"只能排先后，不能当性能预测"。没有给 rigtorp 提 PR。
 
-## 下一步：Dartagnan 交叉判决（优先级最高）
+## 第二轮（2026-11-24，本地）：Dartagnan 交叉判决，已完成
 
-**为什么**：这轮最大的教训是判官会说谎（GenMC 两次给出错误结论且不报错）。让两个独立的检查器都同意才判 PASS，可信度会比加规格高得多。
+用法：`python3 mocheck.py verify impl.hpp --spec X --second-judge dartagnan`。详细说明和数据见 README 的 "Second judge: Dartagnan" 一节。
 
-**已经摸清的**：
-- Dat3M 4.5.0（tag `4.5.0`，commit `0d56990`）需要 Java 25 + Maven ≥ 3.8，`mvn clean install -DskipTests`。产物是 `dartagnan/target/dartagnan.jar` 加 `dartagnan/target/libs/`。
-- 云端卡住的原因：会话网络访问不了 `repo.maven.apache.org`。本地没有这个限制。
-- Dartagnan 能直接读 `.ll`。用法：`java -jar dartagnan.jar cat/rc11.cat --target=c11 prog.ll`，C 程序要设 `DAT3M_HOME`。
-- 我们的 harness 只用了 `assert` 和 `pthread`，没有 GenMC 专属 API，大概率能原样使用。
+**判决规则**：GenMC 判 PASS 的场景才交给 Dartagnan（GenMC 判 FAIL 就已经是最终结论）。Dartagnan 判 FAIL，结论就是 FAIL；Dartagnan 给出其他非 PASS 结果（超时、超内存、循环没展开完、解析失败、碰到不认识的函数），结论就是 INCONCLUSIVE。两种情况都会在输出里标明 `judges disagree`。循环上界依次试 2、4、8、16，到 16 还展开不完就判 INCONCLUSIVE，绝不判 PASS。证书里会同时记录两个检查器的版本。
 
-**建议的做法**：
-1. 先手动试：用 clang++-19 把一个 harness 编成 `.ll`（加上和 `run_scenario` 一样的 `-D` 宏，GenMC 兼容层大概不需要）喂给 Dartagnan，看它能不能解析 libstdc++ 的 `std::atomic`。最可能出问题的就是这一步。
-2. 用已知结论的例子比对：`examples/queue_ok.hpp`（应 PASS）、`queue_bug.hpp`（应 FAIL）、`seqlock_signal_fence.hpp`（GenMC 单独会错判 PASS，Dartagnan 理应判 FAIL）。
-3. 能用的话，在 `mocheck.py` 里加 `--second-judge dartagnan`。判决规则：两边都 PASS 才算 PASS，任一边 FAIL 就算 FAIL（附反例），两边不一致时判 INCONCLUSIVE 并报告分歧。
-4. 注意 Dartagnan 是有界模型检查（BMC），自旋循环需要循环展开上界（`--bound`）。上界不够时它应该报出来，不能静默当作 PASS。这一点要专门写一个用例验证。
+**交叉跑的结果**（两个判官各自独立跑完回归里全部 45 个非 MPMC 用例，共 154 个场景）：
+- 两边都 FAIL 80 个，都 PASS 64 个。
+- GenMC PASS、Dartagnan FAIL 的有 4 个，全是 `fl_oob.hpp`：构造函数越界写，GenMC 本来就看不到（之前只靠 ASan 抓）。**Dartagnan 独立抓到了。**
+- GenMC PASS、Dartagnan INCONCLUSIVE 的有 6 个：`rc_wrapping` 的 CAS 重试循环在 bound 8 超时；`spsc_queue_nb` 规模太大。
+- 按用例算，Dartagnan 单独判 43 个对、2 个 INCONCLUSIVE、0 个错。
+
+**接入时发现 Dartagnan 自己的问题**（每一条都会让它错判，都已经在 mocheck 这边防住）：
+1. 它同样把 `atomic_signal_fence` 当成线程 fence（源码里直接丢掉了 syncscope），和 GenMC 是同一个盲点。所以 signal fence 改写对两个判官都保留着。在这一点上两个判官**并不独立**。
+2. 它的 `rc11.cat` 用的是 C++11 的 release sequence（同线程后续 store 也能续上），GenMC 用的是 C++20 的。因此原版 Dartagnan 会放过 `ebr_relaxed_announce.hpp`。现在用我们自带的 `specs/_rc11_cpp20.cat`。
+3. 它不执行 `@llvm.global_ctors`：全局对象的动态初始化不会跑，程序从全零状态开始。这个在 `ebr_seqcst` 上造成了误判 FAIL，换一份代码同样可能掩盖 bug。现在在 IR 里把构造函数调用插到 `main` 开头。
+4. 它不认识 `operator new/delete`（只认 malloc/free），也解析不了 `invoke/landingpad`。现在用 `specs/_dartagnan_compat.h` 加上 `-fno-exceptions` 解决。
+5. 调用它不认识的函数时会报 FAIL。mocheck 把这种情况改判为 INCONCLUSIVE，因为这不是反例。
+
+外加内存监控（见上面"本机"一节）、`MOCHECK_CLANG_FLAGS`，以及 `tools/dartagnan_only.py`（单独跑第二判官，回归里用来固定第 1、2 条）。回归新增 7 项。
+
+## 下一步
+
+1. **让 MPMC 类规格也能用第二判官**（`mpmc_queue`、`mpmc_queue_relaxed`、`spsc_queue_nb`）。卡在 harness 自己的历史检查：`while (ndrained < MO_MAXVALS && q.pop(v))`、`for k < nops[t]` 这类循环的次数由数据决定，要 bound ≥ 8，这时 SMT 编码超过 4 GB 或 300 秒。可以试的方向：用 Dartagnan 的 `--bound.load` 给不同循环设不同上界；给 Dartagnan 写一个更省的 harness 变体（需要重新准入，而且要证明它和原版等价）。
+2. **CAS 重试循环**（`rc_wrapping`）在 bound 8 超时。可以看看 Dartagnan 有没有对"失败的 CAS 没有副作用"做规约的选项。
+3. **把发现的 Dartagnan 问题报给上游**（Dat3M）：syncscope 被丢掉、rc11.cat 的 release sequence、global_ctors。这是对外的动作，没有做，等你决定。
+4. 原来的长期问题依旧：正则改写应该换成基于 clang AST 的改写。而且现在两个判官共用这套改写，它是两边共同的信任基础。
 
 ## 其他已知问题和想法
 

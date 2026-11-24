@@ -1,9 +1,9 @@
 {
   "verdict": "ADMITTED",
   "spec": "qlock",
-  "spec_digest": "951aa0207095f05904dab3b112e4c9a280488c4ac9bb4f875ededfdbe58e5acd",
-  "admitted_at": "2026-11-23T13:12:51-0500",
-  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.1",
+  "spec_digest": "61631a263fb34a0c49e3796f6d22bf999ffaffad6a5bfa6d01e5fcaff6deb345",
+  "admitted_at": "2026-11-24T17:12:13-0500",
+  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.7",
   "memory_model": "RC11",
   "references": {
     "refs/mcs.hpp": {

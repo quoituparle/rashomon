@@ -51,10 +51,11 @@ The author of `impl.hpp` provides only the implementation. The tool owns everyth
 
 `mutate` keeps the spec honest. It takes a correct reference implementation, makes single-point breakages (orderings weakened, `<`→`<=`, `+`→`-`, constants ±1, `true`↔`false`) and reports which ones the spec fails to catch. Every survivor is either an equivalent mutant or a hole in the spec. It has already found one: all MPMC scenarios used CAP=2, and modulo 2 makes `head+1` and `head-1` indistinguishable. A CAP=3 scenario was added.
 
-## Two checking layers
+## Checking layers
 
 1. **GenMC** explores every interleaving and weak-memory behaviour of each scenario.
-2. **Native ASan + UBSan** pass: only if GenMC passes, the same harness is compiled natively with AddressSanitizer and UndefinedBehaviorSanitizer and run 3 times per scenario on real threads.
+2. **Dartagnan** (optional, `--second-judge dartagnan`): only if GenMC passes, every scenario is checked again by an independent model checker. PASS needs both. See [Second judge](#second-judge-dartagnan).
+3. **Native ASan + UBSan** pass: only if the model checkers pass, the same harness is compiled natively with AddressSanitizer and UndefinedBehaviorSanitizer and run 3 times per scenario on real threads.
 
 GenMC does not check memory safety inside objects. The freelist admission found this: a constructor loop that writes `next[CAP]` survived every GenMC scenario, and ASan catches it immediately (`examples/fl_oob.hpp`).
 
@@ -83,6 +84,7 @@ The judge found real problems in references written for this project, which are 
 - Every execution allowed by RC11 (the C++11 memory model) is explored by GenMC for each bounded scenario. This is **not** an unbounded proof.
 - GenMC prunes side-effect-free spin iterations ("spin-assume"). That pruning is part of the trusted base.
 - When GenMC can't finish within the timeout, the verdict is **INCONCLUSIVE**, never PASS.
+- With `--second-judge dartagnan`, Dartagnan has also found no violation of the same scenario under the same model, with every loop fully unrolled. The certificate then names both checkers (`checker`, `second_judge`) and the loop bound each scenario needed.
 
 ## Shrinking parameters: pulling latent bugs into range
 
@@ -168,7 +170,15 @@ CC=gcc-14 CXX=g++-14 cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/l
 cmake --build build -j
 ```
 
-`./run_examples.sh` runs the regression suite (72 checks, about 5 minutes). Run `mocheck status` first: after changing the judge or a spec, re-admit (`mocheck admit SPEC`, 15s–2min each).
+On Ubuntu 26.04, `clang++-19` selects GCC 16, whose libstdc++ headers are not installed by the packages above (`fatal error: 'atomic' file not found`). Point it at GCC 14 for every compile, GenMC's included:
+
+```
+export MOCHECK_CLANG_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/14
+```
+
+For `--second-judge dartagnan`: Java 25 and Maven ≥ 3.8, then build Dat3M 4.5.0 (`git clone --branch 4.5.0 https://github.com/hernanponcedeleon/Dat3M && cd Dat3M && mvn clean install -DskipTests`) and `export DAT3M_HOME=/path/to/Dat3M`.
+
+`./run_examples.sh` runs the regression suite (79 checks with Dartagnan installed, 72 without; about 8 minutes). Run `mocheck status` first: after changing the judge or a spec, re-admit (`mocheck admit SPEC`, 15s–2min each).
 
 ## Auditing third-party libraries
 
@@ -200,3 +210,32 @@ Making real code run under GenMC took a compatibility layer that `mocheck` owns 
 - **`atomic_signal_fence` is treated as `atomic_thread_fence`** (GenMC drops `syncscope("singlethread")`). A seqlock whose payload is ordered only by signal fences passes GenMC but tears in C++. This is unsound; mocheck strips signal fences before GenMC sees them. Found through rigtorp/Seqlock; pinned by `examples/seqlock_signal_fence.hpp`.
 - **Inline asm outputs evaluate to 0.** `asm("" : "+r"(x))`, a common register-pinning idiom that emits no instruction, silently sets `x` to 0 and produced a false data race on atomic_queue. Pinned by `examples/queue_asm_barrier.hpp` / `queue_asm_real.hpp`.
 - Value-initialising an atomic (`std::atomic<T> x{};`, `: x()`) lowers to `llvm.memset`, which GenMC refuses ("Invalid call to memset()").
+
+## Second judge: Dartagnan
+
+GenMC twice gave a wrong verdict without any error (signal fences, inline asm), so a single checker's PASS is only as good as that checker. `verify --second-judge dartagnan` asks a second, independent one: [Dartagnan](https://github.com/hernanponcedeleon/Dat3M) 4.5.0, an SMT-based bounded model checker. Both checkers read the same LLVM IR, so they share clang and mocheck's staging rewrites, but not the exploration algorithm, the runtime, or GenMC's compat layer.
+
+**Rule.** Dartagnan runs only on scenarios GenMC passed (a GenMC FAIL is already final). Any Dartagnan FAIL makes the verdict FAIL; anything else short of PASS (timeout, memory limit, loops not fully unrolled, parse error, unmodelled call) makes it INCONCLUSIVE. Either way the row says `judges disagree (GenMC: PASS, Dartagnan: …)`. Dartagnan is a *bounded* checker: mocheck tries loop bounds 2, 4, 8, 16, and "Not fully unrolled loops" at the last bound is INCONCLUSIVE, never PASS (regression: `MOCHECK_DARTAGNAN_BOUNDS=2` on `ebr`).
+
+**Measured on the regression examples** (both judges run independently on every scenario of the 45 non-MPMC verify cases, 154 scenarios):
+
+| GenMC / Dartagnan | scenarios | |
+|---|---|---|
+| FAIL / FAIL | 80 | |
+| PASS / PASS | 64 | 46 at bound 2, 18 at bound 4 |
+| PASS / **FAIL** | 4 | all `fl_oob.hpp`: the out-of-bounds write GenMC cannot see (it is caught by the ASan pass), Dartagnan reports it as a data race |
+| PASS / INCONCLUSIVE | 6 | `rc_wrapping.hpp` (CAS retry loops: 300 s timeout at bound 8), `spsc_queue_nb` (too large, see below) |
+
+Judged per example, Dartagnan alone gets 43 of 45 right, 2 inconclusive, none wrong. It costs about 5 s per small scenario and up to 20–50 s for ebr/freelist, against GenMC's sub-second.
+
+**Not covered.** Specs built on the MPMC harness (`mpmc_queue`, `mpmc_queue_relaxed`, `spsc_queue_nb`) need loop bound ≥ 8 for the harness's own history check (`while (ndrained < MO_MAXVALS && q.pop(v))`, `for k < nops[t]`), and at that size the SMT encoding exceeds 4 GB or 300 s. With `--second-judge` they are INCONCLUSIVE: no wrong verdict, but no second opinion either.
+
+**Dartagnan quirks found while wiring it in.** Each would have made the second judge wrong in its own way, and each is handled. `run_examples.sh` pins the `operator new` (latch) and global-constructor (ebr) fixes through `verify`. The signal-fence and release-sequence fixes can't be pinned that way, because GenMC FAILs those examples before Dartagnan runs, so they are pinned with `tools/dartagnan_only.py`, which runs the second judge alone:
+
+- **It also treats `atomic_signal_fence` as a thread fence** (`VisitorLlvm.visitFenceInst` drops `syncscope`). Without mocheck's staging rewrite it PASSes `seqlock_signal_fence.hpp`, the same blind spot as GenMC. The two checkers are not independent here, so the rewrite stays in front of both.
+- **Its `rc11.cat` uses C++11 release sequences**: `rs = [W]; (po & loc)?; …` lets a later same-thread store continue a release sequence. C++20 (P0982) removed that and GenMC implements C++20, so stock Dartagnan PASSes `ebr_relaxed_announce.hpp`. mocheck ships `specs/_rc11_cpp20.cat` with the C++20 rule.
+- **It never runs `@llvm.global_ctors`**, so dynamically initialised globals (`Epoch &ebr = *new Epoch`, any non-constexpr constructor) start out zeroed. This produced a false FAIL on `ebr_seqcst.hpp`, and in other code it could equally hide a bug. mocheck inserts the constructor calls at the top of `main` in the IR.
+- **No `operator new`/`delete`**, only `malloc`/`free`, and **no `invoke`/`landingpad`** (which clang emits for `new T(...)`). `specs/_dartagnan_compat.h` defines the replaceable allocation functions on top of `malloc`, and the Dartagnan build uses `-fno-exceptions` (code that really throws is INCONCLUSIVE).
+- **Calling an unknown function is reported as FAIL** ("Calling unknown function"). mocheck reports it as INCONCLUSIVE: it is the judge not knowing a library call, not a counterexample.
+- Full debug info does not parse (template value parameters); mocheck uses `-gline-tables-only`. Unparsed inline asm becomes a nondeterministic value with a warning; mocheck refuses asm for this judge as for GenMC.
+- **Memory**: the embedded SMT solver allocates outside the JVM heap (11 GB resident under `-Xmx3g`), and two parallel runs took down a 15 GB VM. mocheck kills it above `MOCHECK_DARTAGNAN_MEM_MB` (default 4096) and reports INCONCLUSIVE.

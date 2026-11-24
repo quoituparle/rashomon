@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -92,6 +93,9 @@ class Finding:
 # Front end: clang's JSON AST of the *instantiated* code
 # ----------------------------------------------------------------------------
 CLANGXX = os.environ.get("CLANGXX", shutil.which("clang++-19") or shutil.which("clang++") or "clang++")
+# Extra flags for every C++ compile (clang and GenMC's frontend), e.g. when clang picks a GCC
+# install without libstdc++ headers: MOCHECK_CLANG_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/14
+CXXSTD = ["-std=c++20", *shlex.split(os.environ.get("MOCHECK_CLANG_FLAGS", ""))]
 MAIN_NAME = "mocheck_frontend.cpp"
 
 
@@ -157,7 +161,7 @@ def analyze(path: Path, instantiate: str | None = None, prelude: str | None = No
     main = work / MAIN_NAME
     main.write_bytes(src + b"\n" + (instantiate or "").encode() + b"\n")
     try:
-        p = subprocess.run([CLANGXX, "-x", "c++", "-std=c++20", "-fsyntax-only", f"-I{path.parent}",
+        p = subprocess.run([CLANGXX, "-x", "c++", *CXXSTD, "-fsyntax-only", f"-I{path.parent}",
                             *_prelude_args(work, prelude), "-Xclang", "-ast-dump=json", str(main)],
                            capture_output=True, text=True, timeout=300)
     finally:
@@ -410,6 +414,7 @@ class RunResult:
     executions: int = 0
     seconds: float = 0.0
     blocked: int = 0
+    note: str = ""  # shown instead of the execution count on a pass (e.g. the bound used)
 
 
 def _genmc_version() -> str:
@@ -422,19 +427,23 @@ def _genmc_version() -> str:
         return f"unknown ({e})"
 
 
-def run_scenario(impl: Path, spec: dict, scen: dict, timeout: float) -> RunResult:
-    defs = [f"-D{k}={v}" for k, v in {**spec.get("defines", {}), **scen}.items()]
-    stage = Path(tempfile.mkdtemp(prefix="mocheck-run-"))
+def stage_impl(impl: Path, genmc: bool = True) -> str:
+    """The implementation as the model checkers see it. Every rewrite here preserves C++
+    semantics between threads; they exist because a checker would otherwise misjudge the
+    original (silently, in the signal-fence and asm cases). Shared by both judges; only the
+    throw rewrite is GenMC-specific (it relies on specs/_genmc_compat.h)."""
     # Weak CAS inside a retry loop is modelled as strong: a spurious failure only
     # makes the loop go round again with the same expected value (a stutter), and
     # exploring unboundedly many stutters is what makes GenMC never terminate.
     # Weak CAS outside a loop is rejected by lint, so nothing is lost there.
     text = re.sub(r"\bcompare_exchange_weak\b", "compare_exchange_strong", impl.read_text(errors="replace"))
     # exceptions cannot be modelled by GenMC (see specs/_genmc_compat.h)
-    text = re.sub(r"\bthrow\s+(?!\s*\))([^;{}]*);", "__mocheck_throw_unreachable();", text)
+    if genmc:
+        text = re.sub(r"\bthrow\s+(?!\s*\))([^;{}]*);", "__mocheck_throw_unreachable();", text)
     # GenMC ignores syncscope("singlethread") and treats atomic_signal_fence as a full
     # thread fence, which would make code relying on it look correct. Between threads a
     # signal fence guarantees nothing, so removing it is exactly the C++ semantics.
+    # Dartagnan 4.5.0 has the same blind spot (VisitorLlvm.visitFenceInst drops syncscope).
     text = re.sub(r"(?:std::)?\batomic_signal_fence\s*\([^;]*\)\s*;", "/* signal fence: no inter-thread effect */;", text)
     # `T member[N] = {};` zero-fills with memset, which GenMC rejects on atomics. Harness
     # objects have static storage (already zeroed before construction), so dropping the
@@ -461,11 +470,17 @@ def run_scenario(impl: Path, spec: dict, scen: dict, timeout: float) -> RunResul
     text = re.sub(r'\b(?:__)?asm(?:__)?\s*(?:(?:__)?volatile(?:__)?\s*)?\(\s*""\s*(?::[^;\n]*)?\)', "((void)0)", text)
     # CPU spin hints (x86 pause) are semantically no-ops and unknown to GenMC
     text = re.sub(r"\b(?:_mm_pause|__builtin_ia32_pause)\s*\(\s*\)", "((void)0)", text)
-    (stage / "mocheck_impl.hpp").write_text(text)
+    return text
+
+
+def run_scenario(impl: Path, spec: dict, scen: dict, timeout: float) -> RunResult:
+    defs = [f"-D{k}={v}" for k, v in {**spec.get("defines", {}), **scen}.items()]
+    stage = Path(tempfile.mkdtemp(prefix="mocheck-run-"))
+    (stage / "mocheck_impl.hpp").write_text(stage_impl(impl))
     live = ["--check-liveness"] if spec.get("liveness", "genmc") == "genmc" else []
     # Inline asm that survives preprocessing is real code GenMC would silently evaluate as 0:
     # refuse to judge it. Checked on the IR so asm in inactive #if branches (other CPUs) is fine.
-    flags = ["-std=c++20", "-include", str(GENMC_COMPAT), f"-I{GENMC_SHIMS}", f"-I{stage}", f"-I{impl.parent}",
+    flags = [*CXXSTD, "-include", str(GENMC_COMPAT), f"-I{GENMC_SHIMS}", f"-I{stage}", f"-I{impl.parent}",
              f"-I{GENMC_INCLUDE}", *defs]
     ir = subprocess.run([CLANGXX, *flags, "-S", "-emit-llvm", "-O0", "-o", "-", str(spec["harness"])],
                         capture_output=True, text=True)
@@ -474,7 +489,7 @@ def run_scenario(impl: Path, spec: dict, scen: dict, timeout: float) -> RunResul
         shutil.rmtree(stage, ignore_errors=True)
         return RunResult(scen, "inconclusive", f'inline assembly "{asm.group(1)[:40]}" cannot be model-checked '
                          "(GenMC would evaluate it as 0); give it a portable C++ fallback")
-    cmd = [GENMC, MODEL, *live, "--disable-estimation", "--", "-std=c++20", "-include", str(GENMC_COMPAT),
+    cmd = [GENMC, MODEL, *live, "--disable-estimation", "--", *CXXSTD, "-include", str(GENMC_COMPAT),
            f"-I{GENMC_SHIMS}", f"-I{stage}", f"-I{impl.parent}", *defs, str(spec["harness"])]
     t0 = time.time()
     try:
@@ -526,7 +541,7 @@ def run_native(impl: Path, spec: dict, scen: dict, timeout: float) -> RunResult:
     try:
         shutil.copy(impl, stage / "mocheck_impl.hpp")
         exe = stage / "harness"
-        c = subprocess.run([CLANGXX, "-std=c++20", "-O1", "-g", "-fsanitize=address,undefined",
+        c = subprocess.run([CLANGXX, *CXXSTD, "-O1", "-g", "-fsanitize=address,undefined",
                             "-fno-sanitize-recover=all", "-fno-omit-frame-pointer", "-pthread",
                             f"-I{stage}", f"-I{impl.parent}", *defs, str(spec["harness"]), "-o", str(exe)],
                            capture_output=True, text=True, timeout=300)
@@ -551,6 +566,185 @@ def run_native(impl: Path, spec: dict, scen: dict, timeout: float) -> RunResult:
         shutil.rmtree(stage, ignore_errors=True)
 
 
+# ----------------------------------------------------------------------------
+# Second judge: Dartagnan (Dat3M), an SMT-based bounded model checker
+# ----------------------------------------------------------------------------
+# GenMC has silently given wrong verdicts before (signal fences, inline asm). With
+# --second-judge dartagnan every scenario is also checked by an independent tool, and a
+# PASS needs both. Dartagnan reads the same LLVM IR, so it shares clang and stage_impl,
+# but not GenMC's exploration algorithm, interpreter or compat layer.
+#
+# Measured behaviour of Dat3M 4.5.0 that this relies on:
+# - it also drops syncscope("singlethread") on fences, so the signal-fence rewrite in
+#   stage_impl is required for it too (without it seqlock_signal_fence.hpp PASSes);
+# - it crashes on empty-template asm with outputs (erased by stage_impl) and replaces other
+#   unparsed asm with a nondeterministic value (refused here, as for GenMC);
+# - it is a *bounded* checker: when loops are not fully unrolled it answers UNKNOWN
+#   ("Not fully unrolled loops"). We then double the bound; if the bound runs out the
+#   scenario is INCONCLUSIVE, never PASS;
+# - its rc11.cat keeps C++11 release sequences (a later same-thread store continues one);
+#   GenMC has C++20's. specs/_rc11_cpp20.cat fixes that (ebr_relaxed_announce.hpp);
+# - it never runs @llvm.global_ctors (see _call_global_ctors_from_main);
+# - it models malloc/free but not operator new/delete (specs/_dartagnan_compat.h), and
+#   cannot parse invoke/landingpad (hence -fno-exceptions);
+# - a call to a function it does not know is reported as a FAIL; we make it INCONCLUSIVE.
+DAT3M_HOME = os.environ.get("DAT3M_HOME", str(Path.home() / "Dat3M"))
+DARTAGNAN_JAR = os.environ.get("DARTAGNAN_JAR", str(Path(DAT3M_HOME) / "dartagnan" / "target" / "dartagnan.jar"))
+DARTAGNAN_CAT = HERE / "specs" / "_rc11_cpp20.cat"
+DARTAGNAN_COMPAT = HERE / "specs" / "_dartagnan_compat.h"  # operator new/delete on malloc/free
+# loop-unrolling bounds tried in turn; overridable (e.g. "2") so the regression can prove that
+# a bound that is too small yields INCONCLUSIVE rather than PASS
+DARTAGNAN_BOUNDS = tuple(int(b) for b in os.environ.get("MOCHECK_DARTAGNAN_BOUNDS", "2,4,8,16").split(","))
+# Memory: the JVM takes up to 1/4 of RAM for its heap by default, and the SMT solver it embeds
+# allocates natively on top (11 GB RSS seen under -Xmx3g at bound 8). Two judges in parallel
+# took down a 15 GB WSL VM. So the heap is capped and the whole process is killed above
+# DARTAGNAN_MEM_MB of resident memory; either outcome is INCONCLUSIVE, never PASS.
+DARTAGNAN_JAVA_OPTS = shlex.split(os.environ.get("MOCHECK_JAVA_OPTS", "-Xmx2g"))
+DARTAGNAN_MEM_MB = int(os.environ.get("MOCHECK_DARTAGNAN_MEM_MB", "4096"))
+
+
+def _rss_mb(pid: int) -> float:
+    try:
+        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) / 1024
+    except OSError:
+        pass
+    return 0.0
+
+
+def _run_watched(cmd: list[str], timeout: float, mem_mb: int, **kw) -> tuple[str, str]:
+    """Run cmd, killing it on timeout or when its resident memory exceeds mem_mb.
+    Returns (output, status) with status 'ok', 'timeout' or 'memory'."""
+    with tempfile.TemporaryFile("w+") as buf:
+        p = subprocess.Popen(cmd, stdout=buf, stderr=subprocess.STDOUT, text=True, **kw)
+        t0, status = time.time(), "ok"
+        while p.poll() is None:
+            if time.time() - t0 > timeout:
+                status = "timeout"
+            elif _rss_mb(p.pid) > mem_mb:
+                status = "memory"
+            if status != "ok":
+                p.kill()
+                p.wait()
+                break
+            time.sleep(0.25)
+        buf.seek(0)
+        return buf.read(), status
+
+
+def _dartagnan_version() -> str:
+    try:
+        sha = hashlib.sha256(Path(DARTAGNAN_JAR).read_bytes()).hexdigest()[:12]
+        compat = hashlib.sha256(DARTAGNAN_COMPAT.read_bytes() + DARTAGNAN_CAT.read_bytes()).hexdigest()[:12]
+        tag = subprocess.run(["git", "-C", DAT3M_HOME, "describe", "--tags", "--always"],
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+        return f"Dartagnan {tag or '?'} (jar sha256 {sha}, model+compat sha256 {compat})"
+    except Exception as e:  # pragma: no cover
+        return f"Dartagnan unknown ({e})"
+
+
+def _call_global_ctors_from_main(ir: str) -> str | None:
+    """Dartagnan 4.5.0 ignores @llvm.global_ctors, so dynamic initialisation of globals (a
+    non-constexpr constructor, `T &x = *new T;`) never runs and the program starts from
+    zeroed globals: wrong in both directions. Do what the C++ runtime does: call them, in
+    priority order, at the top of main. None if main cannot be found."""
+    m = re.search(r"^@llvm\.global_ctors = appending global \[\d+ x \{[^}]*\}\] \[(.*)\]", ir, re.M)
+    if not m:
+        return ir
+    entries = re.findall(r"\{ i32 (\d+), ptr (@[\w.$\"-]+|null), ptr [^}]*\}", m.group(1))
+    ctors = [fn for _, fn in sorted(entries, key=lambda e: int(e[0])) if fn != "null"]
+    mm = re.search(r"^define [^\n]*@main\([^\n]*\{\n(?:entry:\n)?", ir, re.M)
+    if not mm:
+        return None
+    calls = "".join(f"  call void {fn}()\n" for fn in ctors)
+    return ir[:mm.end()] + calls + ir[mm.end():]
+
+
+def run_scenario_dartagnan(impl: Path, spec: dict, scen: dict, timeout: float) -> RunResult:
+    tag = {**scen, "check": "dartagnan"}
+    defs = [f"-D{k}={v}" for k, v in {**spec.get("defines", {}), **scen}.items()]
+    stage = Path(tempfile.mkdtemp(prefix="mocheck-dat-"))
+    t0 = time.time()
+    try:
+        (stage / "mocheck_impl.hpp").write_text(stage_impl(impl, genmc=False))
+        ll = stage / "prog.ll"
+        # -disable-O0-optnone lets Dartagnan simplify the IR itself; full debug info is not
+        # parseable by it (template value parameters), line tables still give source lines.
+        # -fno-exceptions: its frontend cannot parse invoke/landingpad, which clang emits for
+        # any `new T(...)` whose constructor might throw. Code that really throws is refused.
+        c = subprocess.run([CLANGXX, *CXXSTD, "-fno-exceptions", "-S", "-emit-llvm", "-O0",
+                            "-Xclang", "-disable-O0-optnone",
+                            "-gline-tables-only", "-fno-discard-value-names", "-include", str(DARTAGNAN_COMPAT),
+                            f"-I{stage}", f"-I{impl.parent}",
+                            *defs, str(spec["harness"]), "-o", str(ll)], capture_output=True, text=True, timeout=300)
+        if c.returncode != 0:
+            msg = "\n".join(l for l in c.stderr.splitlines() if "error:" in l)[:2000]
+            if "exceptions disabled" in msg:
+                return RunResult(tag, "inconclusive", "code can throw; exceptions are not modelled by the second judge",
+                                 seconds=time.time() - t0)
+            return RunResult(tag, "compile-error", msg or c.stderr[:2000], seconds=time.time() - t0)
+        ir = ll.read_text(errors="replace")
+        asm = re.search(r'call [^\n]*\basm (?:sideeffect )?(?:inteldialect )?"([^"]*)"', ir)
+        if asm:
+            return RunResult(tag, "inconclusive", f'inline assembly "{asm.group(1)[:40]}" cannot be model-checked',
+                             seconds=time.time() - t0)
+        if re.search(r"\bcall [^\n]*@__cxa_throw\b", ir):
+            return RunResult(tag, "inconclusive", "code can throw; exceptions are not modelled by the second judge",
+                             seconds=time.time() - t0)
+        ir = _call_global_ctors_from_main(ir)
+        if ir is None:
+            return RunResult(tag, "inconclusive", "global constructors present but main() not found in the IR",
+                             seconds=time.time() - t0)
+        ll.write_text(ir)
+        # 'termination' is the counterpart of GenMC's --check-liveness; specs that opted out of
+        # it (retry loops misreported as livelocks) are checked for safety and data races only.
+        props = ("program_spec,termination,cat_spec" if spec.get("liveness", "genmc") == "genmc"
+                 else "program_spec,cat_spec")
+        env = dict(os.environ, DAT3M_HOME=DAT3M_HOME)
+        last = "no result"
+        for bound in DARTAGNAN_BOUNDS:
+            left = timeout - (time.time() - t0)
+            if left <= 1:
+                return RunResult(tag, "inconclusive", f"timed out after {timeout:.0f}s ({last})",
+                                 seconds=time.time() - t0)
+            cmd = ["java", *DARTAGNAN_JAVA_OPTS, "-jar", DARTAGNAN_JAR, str(DARTAGNAN_CAT), "--target=c11",
+                   f"--bound={bound}", f"--property={props}", str(ll)]
+            out, status = _run_watched(cmd, left, DARTAGNAN_MEM_MB, env=env, cwd=DAT3M_HOME)
+            if status == "timeout":
+                return RunResult(tag, "inconclusive", f"timed out after {timeout:.0f}s at bound {bound}",
+                                 seconds=time.time() - t0)
+            if status == "memory":
+                return RunResult(tag, "inconclusive", f"memory limit ({DARTAGNAN_MEM_MB} MB) exceeded at bound {bound}",
+                                 seconds=time.time() - t0)
+            if "None of the parsers succeeded for inline assembly" in out:
+                return RunResult(tag, "inconclusive", "unparsed inline assembly (Dartagnan would guess its value)",
+                                 seconds=time.time() - t0)
+            rm = re.search(r"^Result: (\w+)", out, re.M)
+            res = rm.group(1) if rm else ""
+            wm = re.search(r"^Reason: (.*)$", out, re.M)
+            why = wm.group(1).strip() if wm else ""
+            det = out[out.find("Details:"):].split("\nTime:")[0].strip() if "Details:" in out else ""
+            if res == "PASS":
+                return RunResult(tag, "pass", note=f"bound {bound}", seconds=time.time() - t0)
+            if res == "FAIL" and "Calling unknown function" in det:
+                # reported as a violation, but it is the judge not knowing a library call
+                fn = re.search(r"Calling unknown function (\S+)", det).group(1)
+                return RunResult(tag, "inconclusive", f"Dartagnan does not model {fn}", det,
+                                 seconds=time.time() - t0)
+            if res == "FAIL":
+                return RunResult(tag, "fail", f"{why} (bound {bound})", det, seconds=time.time() - t0)
+            if res == "UNKNOWN" and "unrolled" in why:
+                last = f"loops not fully unrolled at bound {bound}"
+                continue
+            tail = (why or (out.strip().splitlines() or ["no output"])[-1])[:300]
+            return RunResult(tag, "inconclusive", f"Dartagnan {res or 'gave no result'}: {tail}", det,
+                             seconds=time.time() - t0)
+        return RunResult(tag, "inconclusive", f"{last} (largest bound tried)", seconds=time.time() - t0)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
 LLVM_PROFDATA = os.environ.get("LLVM_PROFDATA", shutil.which("llvm-profdata-19") or "llvm-profdata")
 LLVM_COV = os.environ.get("LLVM_COV", shutil.which("llvm-cov-19") or "llvm-cov")
 
@@ -566,7 +760,7 @@ def line_profile(impl: Path, spec: dict, runs: int = 3, timeout: float = 30.0) -
         for si, scen in enumerate(spec["scenarios"]):
             defs = [f"-D{k}={v}" for k, v in {**spec.get("defines", {}), **scen}.items()]
             exe = stage / f"prof{si}"
-            c = subprocess.run([CLANGXX, "-std=c++20", "-O0", "-pthread", "-fprofile-instr-generate",
+            c = subprocess.run([CLANGXX, *CXXSTD, "-O0", "-pthread", "-fprofile-instr-generate",
                                 "-fcoverage-mapping", f"-I{stage}", f"-I{impl.parent}", *defs,
                                 str(spec["harness"]), "-o", str(exe)], capture_output=True, text=True, timeout=300)
             if c.returncode != 0:
@@ -599,6 +793,17 @@ def line_profile(impl: Path, spec: dict, runs: int = 3, timeout: float = 30.0) -
 
 def judge(impl: Path, spec: dict, timeout: float, stop_on_fail=True) -> list[RunResult]:
     results = judge_genmc(impl, spec, timeout, stop_on_fail)
+    # Second judge: only GenMC PASSes need confirming (a GenMC FAIL is already a FAIL). Any
+    # Dartagnan FAIL makes the verdict FAIL, anything else short of PASS makes it INCONCLUSIVE;
+    # both are reported as a disagreement, since GenMC passed the same scenario.
+    if spec.get("_second_judge") == "dartagnan" and all(r.verdict == "pass" for r in results):
+        for scen in spec["scenarios"]:
+            r = run_scenario_dartagnan(impl, spec, scen, timeout)
+            if r.verdict != "pass":
+                r.error = f"judges disagree (GenMC: PASS, Dartagnan: {r.verdict.upper()}) — {r.error}"
+            results.append(r)
+            if stop_on_fail and r.verdict in ("fail", "compile-error"):
+                break
     if all(r.verdict == "pass" for r in results):
         for scen in spec["scenarios"]:
             r = run_native(impl, spec, scen, min(timeout, 30.0))
@@ -642,6 +847,7 @@ def certificate(impl: Path, spec_name: str, spec: dict, results, verdict: str) -
         "spec_admitted": admission_status(spec)[0],
         "memory_model": MODEL.lstrip("-").upper(),
         "checker": _genmc_version(),
+        **({"second_judge": _dartagnan_version()} if spec.get("_second_judge") == "dartagnan" else {}),
         "guarantee": "exhaustive over all executions allowed by the memory model, "
                      "for the bounded scenarios listed (not an unbounded proof); "
                      "side-effect-free spin iterations are pruned by GenMC's spin-assume, and weak CAS "
@@ -651,7 +857,8 @@ def certificate(impl: Path, spec_name: str, spec: dict, results, verdict: str) -
         "shrunk_scenarios_skipped": bool(spec.get("_shrink_skipped")),
         "lint_errors_ignored": spec.get("_lint_errors_ignored", 0),
         "scenarios": [{**r.scenario, "verdict": r.verdict, "executions": r.executions,
-                       "pruned_by_spin_assume": r.blocked, "seconds": round(r.seconds, 3)}
+                       "pruned_by_spin_assume": r.blocked, "seconds": round(r.seconds, 3),
+                       **({"note": r.note} if r.note else {})}
                       for r in results],
     }
 
@@ -746,6 +953,8 @@ def cmd_verify(a) -> int:
     _, ok = _lint_gate(path, spec, a.lint_warn)
     if not ok:
         return 2
+    if a.second_judge:
+        spec["_second_judge"] = a.second_judge
     results = judge(path, spec, a.timeout)
     v = overall(results)
     cert = certificate(path, a.spec, spec, results, v)
@@ -759,7 +968,7 @@ def cmd_verify(a) -> int:
         print(f"spec: {a.spec} — {spec['statement']}")
         for r in results:
             sc = " ".join(f"{k}={v}" for k, v in r.scenario.items())
-            extra = f"{r.executions} executions" if r.verdict == "pass" else r.error
+            extra = (r.note or f"{r.executions} executions") if r.verdict == "pass" else r.error
             print(f"  [{r.verdict.upper():>12}] {sc:<20} {extra}  ({r.seconds:.2f}s)")
         print(f"VERDICT: {v}")
         bad = next((r for r in results if r.verdict == "fail"), None)
@@ -833,7 +1042,7 @@ def fenceize(path: Path, spec: dict, sites: list[Site]) -> bytes | None:
     try:
         main_f = work / MAIN_NAME
         main_f.write_bytes(src + b"\n" + (spec.get("instantiate") or "").encode() + b"\n")
-        p = subprocess.run([CLANGXX, "-x", "c++", "-std=c++20", "-fsyntax-only", f"-I{path.parent}",
+        p = subprocess.run([CLANGXX, "-x", "c++", *CXXSTD, "-fsyntax-only", f"-I{path.parent}",
                             *_prelude_args(work, spec.get("prelude")), "-Xclang", "-ast-dump=json", str(main_f)],
                            capture_output=True, text=True, timeout=300)
         ast = json.loads(p.stdout)
@@ -1201,7 +1410,7 @@ def mutation_points(path: Path, instantiate: str | None, sites: list[Site], prel
     work = Path(tempfile.mkdtemp(prefix="mocheck-mut-"))
     main_f = work / MAIN_NAME
     main_f.write_bytes(src + b"\n" + (instantiate or "").encode() + b"\n")
-    p = subprocess.run([CLANGXX, "-x", "c++", "-std=c++20", "-fsyntax-only", f"-I{path.parent}",
+    p = subprocess.run([CLANGXX, "-x", "c++", *CXXSTD, "-fsyntax-only", f"-I{path.parent}",
                         *_prelude_args(work, prelude), "-Xclang", "-ast-dump=json", str(main_f)],
                        capture_output=True, text=True, timeout=300)
     shutil.rmtree(work, ignore_errors=True)
@@ -1434,6 +1643,9 @@ def main(argv=None) -> int:
             sp.add_argument("--json", action="store_true")
             sp.add_argument("--trace", action="store_true", help="print the counterexample execution")
             sp.add_argument("--cert", help="write a JSON certificate here")
+            sp.add_argument("--second-judge", choices=["dartagnan"],
+                            help="also check every scenario GenMC passes with an independent model checker; "
+                                 "PASS needs both, a disagreement is never PASS (needs DAT3M_HOME, java)")
         else:
             sp.add_argument("--out", help="where to write the minimized source")
             sp.add_argument("--candidate-timeout", type=float, default=30.0,

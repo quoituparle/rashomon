@@ -1,9 +1,9 @@
 {
   "verdict": "ADMITTED",
   "spec": "spsc_queue_nb",
-  "spec_digest": "a8821a26a4ae0fbc4a328e34b96cd0e49dcbcb169b3c7729517d8f8751be1468",
-  "admitted_at": "2026-11-23T13:08:22-0500",
-  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.1",
+  "spec_digest": "494b3d31e9045df3f009a738dbaef9358ed826bff9a0150dde943befbacfa4db",
+  "admitted_at": "2026-11-24T17:11:03-0500",
+  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.7",
   "memory_model": "RC11",
   "references": {
     "refs/queue_ok.hpp": {

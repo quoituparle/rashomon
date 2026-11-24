@@ -1,9 +1,9 @@
 {
   "verdict": "ADMITTED",
   "spec": "refcount_saturating",
-  "spec_digest": "7e5bca2dba9878d5ed2d0c5226c4b37713918525bb651afb3e789be5a3d4147d",
-  "admitted_at": "2026-11-23T13:14:26-0500",
-  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.1",
+  "spec_digest": "fe17e8391eb73948b255a6ed512d16cf8116a3109e99ef6b2dee2ec85e7be12f",
+  "admitted_at": "2026-11-24T17:13:30-0500",
+  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.7",
   "memory_model": "RC11",
   "references": {
     "refs/refcount_sat.hpp": {

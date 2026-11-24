@@ -74,6 +74,19 @@ check 0 $M verify seqlock_thread_fence.hpp --spec seqlock              # control
 check 0 $M verify queue_asm_barrier.hpp    --spec spsc_queue           # GenMC alone: asm output = 0 -> false FAIL
 check 3 $M verify queue_asm_real.hpp       --spec spsc_queue           # real asm: refuse to judge
 check 0 $M verify queue_ok.hpp             --spec spsc_queue_nb
+# second judge (Dartagnan): PASS needs both checkers. Skipped when Dartagnan is not installed.
+if [ -f "${DARTAGNAN_JAR:-${DAT3M_HOME:-$HOME/Dat3M}/dartagnan/target/dartagnan.jar}" ]; then
+check 0 $M verify queue_ok.hpp             --spec spsc_queue --second-judge dartagnan
+check 0 $M verify latch_seqcst.hpp         --spec latch      --second-judge dartagnan   # operator new: needs compat + -fno-exceptions
+check 0 $M verify ebr_seqcst.hpp           --spec ebr        --second-judge dartagnan   # Dartagnan skips global ctors unless we call them
+MOCHECK_DARTAGNAN_BOUNDS=2 \
+check 3 $M verify ebr_seqcst.hpp           --spec ebr        --second-judge dartagnan   # loop bound too small: INCONCLUSIVE, never PASS
+check 1 $M verify latch_relaxed_wait.hpp   --spec latch      --second-judge dartagnan
+# Dartagnan alone (GenMC FAILs these first, so verify never asks it): its own defences
+D="python3 ../tools/dartagnan_only.py"
+check 1 $D seqlock_signal_fence.hpp        --spec seqlock    # Dartagnan also ignores syncscope: needs the rewrite
+check 1 $D ebr_relaxed_announce.hpp        --spec ebr        # stock rc11.cat has C++11 release sequences: needs ours
+else echo "skip  second-judge checks (Dartagnan not found; set DAT3M_HOME)"; fi
 $M minimize qlock_seqcst.hpp --spec qlock --out /tmp/qlock.min.hpp --quiet >/dev/null
 same_orders /tmp/qlock.min.hpp ../specs/qlock/refs/mcs.hpp qlock_seqcst
 $M minimize once_seqcst.hpp --spec once --out /tmp/once.min.hpp --quiet >/dev/null
