@@ -1,0 +1,198 @@
+{
+  "statement": "RCU-style reclamation: one writer (tid 0) publishes fresh nodes through a shared pointer and retires the old ones, possibly from inside its own read-side critical section; readers enter, read the current node, and exit. A node is never reclaimed while any thread that entered before it was unlinked may still hold it (no use after free); nothing is reclaimed twice; the current node is never reclaimed; after all threads finish, drain() run alone reclaims everything retired; the object may live in non-zeroed memory; no data race; every operation returns. Not constrained: how promptly nodes are reclaimed before drain(). Premise: the epoch counter (EBITS bits) does not wrap all the way round while one thread stays inside a critical section.",
+  "contract": "template<unsigned NT, unsigned EBITS> struct Epoch { void enter(int tid); void exit(int tid); void retire(int tid, int node); void drain(); };  NT threads with ids 0..NT-1; only tid 0 retires; a node passed to retire has already been unlinked; the implementation reclaims by calling the harness-provided void rashomon_free(int node). EBITS is the epoch counter width (32 in production, shrunk for verification).",
+  "prelude": "void rashomon_free(int node);",
+  "instantiate": "template struct Epoch<2, 2>; template struct Epoch<2, 32>;",
+  "shrink_params": [
+    "EBITS"
+  ],
+  "liveness": "termination",
+  "scenarios": [
+    {
+      "MO_EBITS": 32,
+      "MO_R": 1,
+      "MO_K": 1,
+      "MO_W": 2
+    },
+    {
+      "MO_EBITS": 32,
+      "MO_R": 1,
+      "MO_K": 1,
+      "MO_W": 3
+    },
+    {
+      "MO_EBITS": 32,
+      "MO_R": 1,
+      "MO_K": 2,
+      "MO_W": 2
+    },
+    {
+      "MO_EBITS": 32,
+      "MO_R": 1,
+      "MO_K": 1,
+      "MO_W": 3,
+      "MO_WPIN": 1
+    },
+    {
+      "MO_EBITS": 2,
+      "MO_PRE": 3,
+      "MO_R": 1,
+      "MO_K": 1,
+      "MO_W": 2
+    }
+  ],
+  "scenario_rule": "writes enough for reclamation to happen during the run (W = 2 and W = 3), a reader that re-enters, a writer that retires from inside its own pinned section, and a 2-bit-epoch scenario whose solo publishes push the epoch to 3 so the concurrent part crosses the wrap",
+  "challenge_scenarios": [
+    {
+      "MO_EBITS": 32,
+      "MO_R": 2,
+      "MO_K": 1,
+      "MO_W": 2
+    },
+    {
+      "MO_EBITS": 32,
+      "MO_R": 1,
+      "MO_K": 1,
+      "MO_W": 3
+    },
+    {
+      "MO_EBITS": 2,
+      "MO_PRE": 2,
+      "MO_R": 1,
+      "MO_K": 2,
+      "MO_W": 2
+    },
+    {
+      "MO_EBITS": 3,
+      "MO_PRE": 7,
+      "MO_R": 1,
+      "MO_K": 1,
+      "MO_W": 2
+    }
+  ],
+  "references": [
+    "refs/ebr_ref.hpp"
+  ],
+  "survivor_annotations": [
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L11:C25 constant 2 -> 1",
+      "status": "outside-spec",
+      "why": "compile-time guard: would admit EBITS = 1, which the spec never instantiates (and for which 4 buckets would not divide the epoch range)"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L11:C39 constant 32 -> 33",
+      "status": "outside-spec",
+      "why": "compile-time guard: would admit EBITS = 33, which the spec never instantiates"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L13:C31 constant 16 -> 15",
+      "status": "outside-spec",
+      "why": "limbo bucket capacity: no scenario retires more than a handful of nodes per epoch. The reference uses fixed buckets for simplicity; a production implementation needs growable lists"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L13:C31 constant 16 -> 17",
+      "status": "outside-spec",
+      "why": "limbo bucket capacity, as above"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L15:C31 constant 0 -> 1",
+      "status": "equivalent",
+      "why": "the initial epoch value is arbitrary"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L21:C26 operator '<' -> '<='",
+      "status": "blind-spot",
+      "why": "constructor writes ann[NT], one past the end of a member array of atomics, into the next member. GenMC does not check in-object bounds; ASan has no redzone inside the object (field padding needs a non-trivial destructor in the implementation's own class); UBSan allows forming the one-past-the-end address and the access happens inside atomic::store. A real defect that no layer can see"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L32:C42 constant 1 -> 0",
+      "status": "outside-spec",
+      "why": "only delays reclamation: an active reader's announcement no longer matches the current epoch, so it blocks advancing more often than needed (never less); the spec deliberately does not constrain promptness before drain()"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L32:C42 constant 1 -> 2",
+      "status": "outside-spec",
+      "why": "only delays reclamation: an active reader's announcement no longer matches the current epoch, so it blocks advancing more often than needed (never less); the spec deliberately does not constrain promptness before drain()"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L49:C25 constant 1 -> 0",
+      "status": "outside-spec",
+      "why": "only delays reclamation: an active reader's announcement no longer matches the current epoch, so it blocks advancing more often than needed (never less); the spec deliberately does not constrain promptness before drain()"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L49:C25 constant 1 -> 2",
+      "status": "outside-spec",
+      "why": "only delays reclamation: an active reader's announcement no longer matches the current epoch, so it blocks advancing more often than needed (never less); the spec deliberately does not constrain promptness before drain()"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L50:C12 constant false -> true",
+      "status": "equivalent",
+      "why": "try_advance()'s return value is never used by its callers"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L52:C20 operator '+' -> '-'",
+      "status": "equivalent",
+      "why": "the epoch counts down instead of up; 'two epochs ago' is then ne + 2, which is exactly the bucket freed, so the reclamation rule stays correct"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L56:C11 constant false -> true",
+      "status": "equivalent",
+      "why": "try_advance()'s return value is never used by its callers"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L57:C19 operator '+' -> '-'",
+      "status": "equivalent",
+      "why": "modulo 4, +2 and -2 select the same bucket"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L57:C21 constant 2 -> 1",
+      "status": "outside-spec",
+      "why": "reclaims nodes retired three epochs ago instead of two: later than necessary, never earlier. Promptness is not constrained, and drain()'s three advances still reclaim everything"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L58:C10 constant true -> false",
+      "status": "equivalent",
+      "why": "try_advance()'s return value is never used by its callers"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L69:C16 constant 0 -> 1",
+      "status": "equivalent",
+      "why": "drain() runs alone, so every advance succeeds, and two advances already reclaim everything retired; any count from 2 to 4 is equivalent"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L69:C21 operator '<' -> '<='",
+      "status": "equivalent",
+      "why": "drain() runs alone, so every advance succeeds, and two advances already reclaim everything retired; any count from 2 to 4 is equivalent"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L69:C23 constant 3 -> 2",
+      "status": "equivalent",
+      "why": "drain() runs alone, so every advance succeeds, and two advances already reclaim everything retired; any count from 2 to 4 is equivalent"
+    },
+    {
+      "ref": "refs/ebr_ref.hpp",
+      "mutant": "L69:C23 constant 3 -> 4",
+      "status": "equivalent",
+      "why": "drain() runs alone, so every advance succeeds, and two advances already reclaim everything retired; any count from 2 to 4 is equivalent"
+    }
+  ]
+}

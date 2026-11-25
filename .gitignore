@@ -1,7 +1,7 @@
 __pycache__/
 *.pyc
 realworld/src/
-mocheck/bench/MPMCQueue/
-mocheck/bench/relaxed/
-mocheck/bench/b_*
+rashomon/bench/MPMCQueue/
+rashomon/bench/relaxed/
+rashomon/bench/b_*
 *.tar.gz

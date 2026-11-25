@@ -1,0 +1,21 @@
+{
+  "verdict": "ADMITTED",
+  "spec": "once",
+  "spec_digest": "28d862c6bb1f42c684d85924a2d8a51fe1d0327ac2e5f2914f12d1276932ea00",
+  "admitted_at": "2026-11-24T19:52:44-0500",
+  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.7",
+  "memory_model": "RC11",
+  "references": {
+    "refs/once_ref.hpp": {
+      "mutants": 15,
+      "summary": "killed 14, survived 1, unknown 0, stillborn 0   mutation score 93%",
+      "survivors": [
+        {
+          "mutant": "L9:C48 constant 2 -> 3",
+          "verdict": "SURVIVED",
+          "note": "equivalent: disables the fast path (state is never 3): every call falls through to the CAS, which fails once init has started, and the waiting loop then returns as soon as an acquire load sees 'done'. Same results with the same synchronization, just slower; the fast path is only an optimisation"
+        }
+      ]
+    }
+  }
+}

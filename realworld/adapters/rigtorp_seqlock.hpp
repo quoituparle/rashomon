@@ -83,7 +83,7 @@ private:
 
 #undef RIGTORP_SEQLOCK_NOINLINE
 
-// ---- mocheck adapter (interface translation only; no orderings touched) ----
+// ---- rashomon adapter (interface translation only; no orderings touched) ----
 // The pair is packed into one 64-bit T (GenMC cannot model the memcpy a struct copy compiles to).
 template <unsigned BITS> struct SeqLock {
 	rigtorp::Seqlock<unsigned long long> sl;

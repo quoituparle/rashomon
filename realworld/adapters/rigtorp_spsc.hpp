@@ -382,7 +382,7 @@ private:
 
 #endif // RIGTORP_SPSCQUEUE_H
 
-// ---- mocheck adapter (interface translation only; no orderings touched) ----
+// ---- rashomon adapter (interface translation only; no orderings touched) ----
 template <unsigned CAP> struct Queue {
 	rigtorp::SPSCQueue<int> q{CAP};
 	bool push(int v) { return q.try_push(v); }

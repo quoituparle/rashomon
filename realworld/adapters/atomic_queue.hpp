@@ -1188,7 +1188,7 @@ public:
 
 #endif // ATOMIC_QUEUE_ATOMIC_QUEUE_H_INCLUDED
 
-// ---- mocheck adapter (interface translation only; no orderings touched) ----
+// ---- rashomon adapter (interface translation only; no orderings touched) ----
 // AtomicQueue stores atomic elements with a NIL sentinel; values under test are small positives.
 template <unsigned CAP> struct Queue {
 	atomic_queue::AtomicQueue<unsigned, CAP, ~0u, false> q;

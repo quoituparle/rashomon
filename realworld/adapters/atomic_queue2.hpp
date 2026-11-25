@@ -1188,7 +1188,7 @@ public:
 
 #endif // ATOMIC_QUEUE_ATOMIC_QUEUE_H_INCLUDED
 
-// ---- mocheck adapter (interface translation only; no orderings touched) ----
+// ---- rashomon adapter (interface translation only; no orderings touched) ----
 // MINIMIZE_CONTENTION=false: the library's own option for an exact (non-rounded) capacity.
 template <unsigned CAP> struct Queue {
 	atomic_queue::AtomicQueue2<int, CAP, false> q;

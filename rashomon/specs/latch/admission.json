@@ -1,0 +1,15 @@
+{
+  "verdict": "ADMITTED",
+  "spec": "latch",
+  "spec_digest": "cb177cceaef83bacc36236b827ab9634b5d974f0a378e8c359b5e922b9e39d58",
+  "admitted_at": "2026-11-24T19:52:39-0500",
+  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.7",
+  "memory_model": "RC11",
+  "references": {
+    "refs/latch_ref.hpp": {
+      "mutants": 6,
+      "summary": "killed 6, survived 0, unknown 0, stillborn 0   mutation score 100%",
+      "survivors": []
+    }
+  }
+}

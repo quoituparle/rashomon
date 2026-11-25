@@ -1,4 +1,4 @@
-// mocheck audit adapter: cameron314/readerwriterqueue @ 87b1df1
+// rashomon audit adapter: cameron314/readerwriterqueue @ 87b1df1
 // atomicops.h and readerwriterqueue.h are inlined VERBATIM below; only the adapter at the end is ours.
 // Contract note: ReaderWriterQueue(n) holds ceilToPow2(n+1)-1 items, i.e. exactly n only when n = 2^k-1.
 #pragma once
@@ -1766,7 +1766,7 @@ private:
 #pragma warning(pop)
 #endif
 
-// ---- mocheck adapter ----------------------------------------------------------------------------
+// ---- rashomon adapter ----------------------------------------------------------------------------
 template <unsigned CAP> struct Queue {
     moodycamel::ReaderWriterQueue<int> q{CAP};
     bool push(int v) { return q.try_enqueue(v); }

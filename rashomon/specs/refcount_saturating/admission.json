@@ -1,0 +1,21 @@
+{
+  "verdict": "ADMITTED",
+  "spec": "refcount_saturating",
+  "spec_digest": "f16d70ea98dd408ab2c6968a755256a2094d66200c8052e4a4e8c36d66fc7f03",
+  "admitted_at": "2026-11-24T19:53:28-0500",
+  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.7",
+  "memory_model": "RC11",
+  "references": {
+    "refs/refcount_sat.hpp": {
+      "mutants": 21,
+      "summary": "killed 20, survived 1, unknown 0, stillborn 0   mutation score 95%",
+      "survivors": [
+        {
+          "mutant": "L8:C62 constant 1 -> 0",
+          "verdict": "SURVIVED",
+          "note": "outside-spec: moves the saturation point one value later (2^BITS instead of 2^BITS - 1). The count is stored in a full unsigned, so it still saturates before it can ever wrap: no early free is possible. The spec deliberately constrains safety (never free early, leak after overflow) and the promised minimum capacity, not the exact saturation value"
+        }
+      ]
+    }
+  }
+}

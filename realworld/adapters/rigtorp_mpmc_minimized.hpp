@@ -1,4 +1,4 @@
-// OUTPUT of mocheck minimize on rigtorp_mpmc_explicit.hpp (mpmc_queue_relaxed, aarch64). Not upstream code.
+// OUTPUT of rashomon minimize on rigtorp_mpmc_explicit.hpp (mpmc_queue_relaxed, aarch64). Not upstream code.
 // minimize input: rigtorp_mpmc.hpp with the try_push/try_pop CAS orderings spelled out (implicit seq_cst -> explicit seq_cst, identical semantics)
 // rigtorp/MPMCQueue @ 62f249d, inlined verbatim
 // SPDX-FileCopyrightText: 2020 Erik Rigtorp <erik@rigtorp.se>
@@ -264,7 +264,7 @@ private:
 
 } // namespace rigtorp
 
-// ---- mocheck adapter (interface translation only; no orderings touched) ----
+// ---- rashomon adapter (interface translation only; no orderings touched) ----
 template <unsigned CAP> struct Queue {
 	rigtorp::MPMCQueue<int> q{CAP};
 	bool push(int v) { return q.try_push(v); }

@@ -1,0 +1,15 @@
+{
+  "verdict": "ADMITTED",
+  "spec": "spsc_queue_nb",
+  "spec_digest": "47db6d445ac70cfd1d5dfe903d131eceb1fee84d8aa50da9119b8575d408ca90",
+  "admitted_at": "2026-11-24T19:51:57-0500",
+  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.7",
+  "memory_model": "RC11",
+  "references": {
+    "refs/queue_ok.hpp": {
+      "mutants": 19,
+      "summary": "killed 19, survived 0, unknown 0, stillborn 0   mutation score 100%",
+      "survivors": []
+    }
+  }
+}

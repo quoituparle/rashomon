@@ -262,7 +262,7 @@ private:
 
 } // namespace rigtorp
 
-// ---- mocheck adapter (interface translation only; no orderings touched) ----
+// ---- rashomon adapter (interface translation only; no orderings touched) ----
 template <unsigned CAP> struct Queue {
 	rigtorp::MPMCQueue<int> q{CAP};
 	bool push(int v) { return q.try_push(v); }

@@ -1,0 +1,26 @@
+{
+  "verdict": "ADMITTED",
+  "spec": "seqlock",
+  "spec_digest": "2e55b716b41dc6e3782809411f7947abe65ee23d76622ac939f11b287806ebed",
+  "admitted_at": "2026-11-24T19:52:25-0500",
+  "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.7",
+  "memory_model": "RC11",
+  "references": {
+    "refs/seqlock_ok.hpp": {
+      "mutants": 20,
+      "summary": "killed 18, survived 2, unknown 0, stillborn 0   mutation score 90%",
+      "survivors": [
+        {
+          "mutant": "L13:C16 operator '+' -> '-'",
+          "verdict": "SURVIVED",
+          "note": "equivalent: a seqlock only needs the counter to be odd while a write is in progress and to differ from its previous value afterwards; stepping to s-1 instead of s+1 for the odd in-progress value is just as valid. Modulo 2^BITS the values stay distinct and the parity is unchanged, so the wrap-around period is the same"
+        },
+        {
+          "mutant": "L17:C16 operator '+' -> '-'",
+          "verdict": "SURVIVED",
+          "note": "equivalent: a seqlock only needs the counter to be odd while a write is in progress and to differ from its previous value afterwards; stepping to s-2 instead of s+2 for the final even value is just as valid (the counter counts down). Modulo 2^BITS the values stay distinct and the parity is unchanged, so the wrap-around period is the same"
+        }
+      ]
+    }
+  }
+}
