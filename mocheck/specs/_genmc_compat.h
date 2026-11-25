@@ -74,5 +74,10 @@ void operator delete(void *p, std::align_val_t) noexcept { free(p); }
 void operator delete[](void *p, std::align_val_t) noexcept { free(p); }
 void operator delete(void *p, std::size_t, std::align_val_t) noexcept { free(p); }
 void operator delete[](void *p, std::size_t, std::align_val_t) noexcept { free(p); }
+// Sized deallocation (C++14): clang emits `delete p` on a complete class type as a call to
+// operator delete(void*, size_t), which GenMC does not know ("unknown external function
+// _ZdlPvm"). Found by litmus/global_ctor_ok.cpp.
+void operator delete(void *p, std::size_t) noexcept { free(p); }
+void operator delete[](void *p, std::size_t) noexcept { free(p); }
 #endif
 #endif

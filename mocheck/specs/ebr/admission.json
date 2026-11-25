@@ -1,8 +1,8 @@
 {
   "verdict": "ADMITTED",
   "spec": "ebr",
-  "spec_digest": "4968da8b0377d10b4de772f5f0e1992450246ea4b0e60dea759cc49db9f474c5",
-  "admitted_at": "2026-11-24T17:17:11-0500",
+  "spec_digest": "d74145edeb4c3e1fbe98cb5ffcf5f86f8207365f5d02a1dfbf451fb09683f240",
+  "admitted_at": "2026-11-24T18:15:10-0500",
   "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.7",
   "memory_model": "RC11",
   "references": {

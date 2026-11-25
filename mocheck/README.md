@@ -178,7 +178,7 @@ export MOCHECK_CLANG_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/14
 
 For `--second-judge dartagnan`: Java 25 and Maven ≥ 3.8, then build Dat3M 4.5.0 (`git clone --branch 4.5.0 https://github.com/hernanponcedeleon/Dat3M && cd Dat3M && mvn clean install -DskipTests`) and `export DAT3M_HOME=/path/to/Dat3M`.
 
-`./run_examples.sh` runs the regression suite (79 checks with Dartagnan installed, 72 without; about 8 minutes). Run `mocheck status` first: after changing the judge or a spec, re-admit (`mocheck admit SPEC`, 15s–2min each).
+`./run_examples.sh` runs the regression suite (80 checks with Dartagnan installed, 73 without; about 8 minutes; the first one is the litmus calibration below). Run `mocheck status` first: after changing the judge or a spec, re-admit (`mocheck admit SPEC`, 15s–2min each).
 
 ## Auditing third-party libraries
 
@@ -234,8 +234,22 @@ Judged per example, Dartagnan alone gets 43 of 45 right, 2 inconclusive, none wr
 
 - **It also treats `atomic_signal_fence` as a thread fence** (`VisitorLlvm.visitFenceInst` drops `syncscope`). Without mocheck's staging rewrite it PASSes `seqlock_signal_fence.hpp`, the same blind spot as GenMC. The two checkers are not independent here, so the rewrite stays in front of both.
 - **Its `rc11.cat` uses C++11 release sequences**: `rs = [W]; (po & loc)?; …` lets a later same-thread store continue a release sequence. C++20 (P0982) removed that and GenMC implements C++20, so stock Dartagnan PASSes `ebr_relaxed_announce.hpp`. mocheck ships `specs/_rc11_cpp20.cat` with the C++20 rule.
-- **It never runs `@llvm.global_ctors`**, so dynamically initialised globals (`Epoch &ebr = *new Epoch`, any non-constexpr constructor) start out zeroed. This produced a false FAIL on `ebr_seqcst.hpp`, and in other code it could equally hide a bug. mocheck inserts the constructor calls at the top of `main` in the IR.
+- **It never runs `@llvm.global_ctors`**, so dynamically initialised globals (`Epoch &ebr = *new Epoch`, any non-constexpr constructor) start out zeroed. This produced a false FAIL on `ebr_seqcst.hpp`, and in other code it could equally hide a bug (`litmus/global_ctor_bug.cpp` is one). mocheck inserts the constructor calls at the top of `main` in the IR. Such an initializer, when it sits in the implementation header, also gets a `DILexicalBlockFile` debug scope that crashes Dartagnan's parser; mocheck rewrites it into a plain lexical block.
 - **No `operator new`/`delete`**, only `malloc`/`free`, and **no `invoke`/`landingpad`** (which clang emits for `new T(...)`). `specs/_dartagnan_compat.h` defines the replaceable allocation functions on top of `malloc`, and the Dartagnan build uses `-fno-exceptions` (code that really throws is INCONCLUSIVE).
 - **Calling an unknown function is reported as FAIL** ("Calling unknown function"). mocheck reports it as INCONCLUSIVE: it is the judge not knowing a library call, not a counterexample.
 - Full debug info does not parse (template value parameters); mocheck uses `-gline-tables-only`. Unparsed inline asm becomes a nondeterministic value with a warning; mocheck refuses asm for this judge as for GenMC.
 - **Memory**: the embedded SMT solver allocates outside the JVM heap (11 GB resident under `-Xmx3g`), and two parallel runs took down a 15 GB VM. mocheck kills it above `MOCHECK_DARTAGNAN_MEM_MB` (default 4096) and reports INCONCLUSIVE.
+
+## Litmus calibration
+
+Two judges only help where their errors are independent, and they share a lot: clang, the staging rewrites, the memory-model definition. So the judges are calibrated on programs whose answer is known. `litmus/*.cpp` holds 32 tiny complete programs, each with its expected verdict in a header (`// expect: FAIL race`, optionally `// expect-dartagnan: …` or `// known-wrong: genmc: …`). `tools/litmus.py` stages each one exactly like an implementation under test (same `stage_impl`, flags and model) and runs every installed judge. A FAIL must also fail for the stated reason (assertion, data race or liveness). It takes about 45 s and is the first check of `run_examples.sh`.
+
+Both directions are tested. An *allowed* weak behaviour (store buffering, message passing without synchronization, IRIW under acquire/release, 2+2W, signal fences between threads, a C++20 release sequence broken by a same-thread store) must be found: a judge that PASSes it has a model that is too strong, which is the dangerous direction. A *forbidden* one (the same shapes with seq_cst, release/acquire, fences or RMWs) must not be reported. The rest probe the pipeline: global constructors, `new`/`delete`, empty and real inline asm, weak CAS loops, livelock vs. a correct spin handoff, a bug only reachable after 6 iterations of a run-time loop, and correct code whose loop exceeds Dartagnan's largest bound (must be INCONCLUSIVE, never PASS).
+
+The first run found three problems that the regression examples had not:
+
+- **GenMC could not run `delete`** on a class object (sized `operator delete`, "unknown external function `_ZdlPvm`"): INCONCLUSIVE on correct code. Fixed in `specs/_genmc_compat.h`.
+- **GenMC stops on "Unordered writes"**: when two threads store the same value to one location without ordering, its in-place revisiting turns that warning into an error. mocheck now says so instead of an empty INCONCLUSIVE. Not fixed (disabling it would change every existing verdict), recorded as a known blind spot: `litmus/same_value_writes.cpp`. It can only cause a false alarm, never a false PASS.
+- **Dartagnan crashed on the debug scope of a global initializer** in the implementation header (see the Dartagnan quirks above).
+
+Current result: 32 tests × 2 judges, all as expected, with one known GenMC blind spot. One deliberate choice is visible in `litmus/lb_relaxed.cpp`: RC11 forbids load buffering (`po ∪ rf` acyclic), while ISO C++ technically allows it for relaxed atomics (the out-of-thin-air gap). mocheck promises RC11, so code that is correct under RC11 but relies on the absence of out-of-thin-air values gets a PASS that the standard alone would not guarantee. No real compiler and CPU pair is known to produce those values.

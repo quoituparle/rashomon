@@ -521,6 +521,12 @@ def run_scenario(impl: Path, spec: dict, scen: dict, timeout: float) -> RunResul
         if hist:
             trace = "history:\n  " + "\n  ".join(hist) + "\n\nexecution graph:\n" + trace
         return RunResult(scen, "fail", err, trace, ex, dt)
+    if "Warning: Unordered writes!" in out:
+        # GenMC's in-place revisiting turns this warning into a hard stop. It is not a bug
+        # per se (two threads storing the same value, unordered), so no verdict either way.
+        return RunResult(scen, "inconclusive", "GenMC stopped on 'unordered writes' (two threads store the same "
+                         "value to one location without ordering), treated as an error by its in-place "
+                         "revisiting", seconds=dt)
     if "error:" in out:
         msg = "\n".join(l for l in out.splitlines() if "error:" in l)[:2000]
         return RunResult(scen, "compile-error", msg, seconds=dt)
@@ -584,7 +590,8 @@ def run_native(impl: Path, spec: dict, scen: dict, timeout: float) -> RunResult:
 #   scenario is INCONCLUSIVE, never PASS;
 # - its rc11.cat keeps C++11 release sequences (a later same-thread store continues one);
 #   GenMC has C++20's. specs/_rc11_cpp20.cat fixes that (ebr_relaxed_announce.hpp);
-# - it never runs @llvm.global_ctors (see _call_global_ctors_from_main);
+# - it never runs @llvm.global_ctors (see _call_global_ctors_from_main), and crashes on the
+#   DILexicalBlockFile debug scope such initializers get (_flatten_lexical_block_files);
 # - it models malloc/free but not operator new/delete (specs/_dartagnan_compat.h), and
 #   cannot parse invoke/landingpad (hence -fno-exceptions);
 # - a call to a function it does not know is reported as a FAIL; we make it INCONCLUSIVE.
@@ -661,6 +668,17 @@ def _call_global_ctors_from_main(ir: str) -> str | None:
     return ir[:mm.end()] + calls + ir[mm.end():]
 
 
+def _flatten_lexical_block_files(ir: str) -> str:
+    """Dartagnan 4.5.0 walks each !dbg location's scope chain expecting only DILexicalBlock /
+    DISubprogram / DIFile and crashes on a DILexicalBlockFile, which clang emits when a
+    function's code comes from another file (a global initializer in the implementation header,
+    compiled into the harness's TU). Only Dartagnan reads this metadata, and only for source
+    locations: replace the node with a lexical block scoped directly by the file it names, so
+    the chain ends at the right file. Found by litmus/global_ctor_*.cpp."""
+    return re.sub(r"!DILexicalBlockFile\(scope: ![0-9]+, file: (![0-9]+)[^)]*\)",
+                  r"!DILexicalBlock(scope: \1, file: \1, line: 0)", ir)
+
+
 def run_scenario_dartagnan(impl: Path, spec: dict, scen: dict, timeout: float) -> RunResult:
     tag = {**scen, "check": "dartagnan"}
     defs = [f"-D{k}={v}" for k, v in {**spec.get("defines", {}), **scen}.items()]
@@ -696,7 +714,7 @@ def run_scenario_dartagnan(impl: Path, spec: dict, scen: dict, timeout: float) -
         if ir is None:
             return RunResult(tag, "inconclusive", "global constructors present but main() not found in the IR",
                              seconds=time.time() - t0)
-        ll.write_text(ir)
+        ll.write_text(_flatten_lexical_block_files(ir))
         # 'termination' is the counterpart of GenMC's --check-liveness; specs that opted out of
         # it (retry loops misreported as livelocks) are checked for safety and data races only.
         props = ("program_spec,termination,cat_spec" if spec.get("liveness", "genmc") == "genmc"

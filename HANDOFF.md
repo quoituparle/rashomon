@@ -4,7 +4,7 @@
 
 ## 一句话现状
 
-C++ 内存序判官：AI 按规格写实现，mocheck 给出 PASS / FAIL（带反例）/ INCONCLUSIVE。13 个规格全部通过准入，79 项回归 0 失败（装了 Dartagnan 时；没装时 72 项）。第二轮加上了 `--second-judge dartagnan`：GenMC 判 PASS 之后，再由 Dartagnan 独立检查每个场景，两边都 PASS 才算 PASS。接入过程中发现 Dartagnan 自己也有 5 个会导致错判的问题，都已经在 mocheck 这边防住。现在的主要缺口：MPMC 类规格对 Dartagnan 来说太大，第二判官只能给 INCONCLUSIVE。
+C++ 内存序判官：AI 按规格写实现，mocheck 给出 PASS / FAIL（带反例）/ INCONCLUSIVE。13 个规格全部通过准入，80 项回归 0 失败（装了 Dartagnan 时；没装时 73 项）。回归的第一项是 litmus 校准：32 个答案已知的小程序，两个判官都要判对。第二轮加上了 `--second-judge dartagnan`：GenMC 判 PASS 之后，再由 Dartagnan 独立检查每个场景，两边都 PASS 才算 PASS。接入过程中发现 Dartagnan 自己也有 5 个会导致错判的问题，都已经在 mocheck 这边防住。现在的主要缺口：MPMC 类规格对 Dartagnan 来说太大，第二判官只能给 INCONCLUSIVE。
 
 ## 仓库结构
 
@@ -96,8 +96,22 @@ for s in spsc_queue_nb spsc_queue mpmc_queue mpmc_queue_relaxed seqlock mutex ql
 
 外加内存监控（见上面"本机"一节）、`MOCHECK_CLANG_FLAGS`，以及 `tools/dartagnan_only.py`（单独跑第二判官，回归里用来固定第 1、2 条）。回归新增 7 项。
 
+## 第三轮（2026-11-24）：litmus 校准
+
+起因：两个判官共用 clang、改写和内存模型定义，所以它们会不会"一起错"必须实际量一量。
+
+- `litmus/*.cpp`：32 个小程序，每个文件头里写好预期结果（`// expect: FAIL race` 之类），`tools/litmus.py` 按和真实实现完全一样的流水线跑所有判官。FAIL 还要求原因对得上（断言、数据竞争还是活性）。耗时约 45 秒，已经是 `run_examples.sh` 的第一项。
+- 两个方向都测。**允许的**弱行为必须被找出来：判官如果判 PASS，说明它的模型太强，这是会导致误放的危险方向。**禁止的**行为不能被报出来。另有一组专门测流水线：全局构造函数、new/delete、asm、弱 CAS、活锁、循环上界。
+- 第一次跑就找出 3 个回归用例没覆盖到的问题：
+  1. GenMC 不认识 sized `operator delete`，任何 `delete` 对象的代码都判 INCONCLUSIVE。已在 `_genmc_compat.h` 里补上。
+  2. GenMC 遇到两个线程无序地写同一个值时，会因为 in-place revisiting 直接停掉。现在 mocheck 会说明原因。这个没修（关掉它会改变所有已有判决），作为已知盲点记录在 `litmus/same_value_writes.cpp`。它只会造成误报，不会造成误放。
+  3. 实现头文件里的全局初始化会带一个 `DILexicalBlockFile` 调试作用域，Dartagnan 遇到就解析崩溃。现在在 IR 里改写掉。
+- 现在的结果：32 × 2 全部符合预期，外加 1 个已知的 GenMC 盲点。
+- 一个有意保留的取舍：RC11 禁止 load buffering（`lb_relaxed.cpp`），而 ISO C++ 理论上允许（凭空产生值，即 out-of-thin-air 问题）。mocheck 承诺的是 RC11，这一点比标准强，README 里写明了。
+
 ## 下一步
 
+0. litmus 可以继续扩充：consume、混合大小访问、`std::atomic_ref`、`wait/notify`。这些目前都没有覆盖，结论不明。每加一个答案已知的测试，判官的可信度就多一分证据。
 1. **让 MPMC 类规格也能用第二判官**（`mpmc_queue`、`mpmc_queue_relaxed`、`spsc_queue_nb`）。卡在 harness 自己的历史检查：`while (ndrained < MO_MAXVALS && q.pop(v))`、`for k < nops[t]` 这类循环的次数由数据决定，要 bound ≥ 8，这时 SMT 编码超过 4 GB 或 300 秒。可以试的方向：用 Dartagnan 的 `--bound.load` 给不同循环设不同上界；给 Dartagnan 写一个更省的 harness 变体（需要重新准入，而且要证明它和原版等价）。
 2. **CAS 重试循环**（`rc_wrapping`）在 bound 8 超时。可以看看 Dartagnan 有没有对"失败的 CAS 没有副作用"做规约的选项。
 3. **把发现的 Dartagnan 问题报给上游**（Dat3M）：syncscope 被丢掉、rc11.cat 的 release sequence、global_ctors。这是对外的动作，没有做，等你决定。

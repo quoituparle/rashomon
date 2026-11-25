@@ -1,8 +1,8 @@
 {
   "verdict": "ADMITTED",
   "spec": "mpmc_queue_relaxed",
-  "spec_digest": "346e3dff4984696b64ffa3444078331adb908f9619456635ebef3991c557ff41",
-  "admitted_at": "2026-11-24T17:14:12-0500",
+  "spec_digest": "44369da59af4d69d6bae9788c34482295ae5e573411952371b77afa6fe3c18de",
+  "admitted_at": "2026-11-24T18:12:37-0500",
   "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.7",
   "memory_model": "RC11",
   "references": {

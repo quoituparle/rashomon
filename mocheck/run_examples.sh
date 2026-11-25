@@ -9,6 +9,8 @@ same_orders(){ diff <(orders "$1") <(orders "$2") >/dev/null \
   && echo "ok    minimize($3) == $(basename "$2")" || { echo "WRONG minimize($3) != $(basename "$2")"; fails=$((fails+1)); }; }
 # exit codes: 0 pass, 1 fail, 2 lint refused, 3 inconclusive/compile error, 4 spec not admitted
 check 0 $M status
+# calibration: litmus tests with known answers, through the real pipeline, on every installed judge
+check 0 env python3 ../tools/litmus.py --quiet
 # tampering: a byte-identical copy of an admitted spec is still admitted; an edited one is refused
 rm -rf ../specs/_tamper && cp -r ../specs/mutex ../specs/_tamper
 check 0 $M verify mutex_ok.hpp --spec _tamper
