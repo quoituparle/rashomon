@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Launcher: put this repo's bin/ on your PATH and run `rashomon <command> ...`.
+#   export PATH="/path/to/rashomon/bin:$PATH"
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+exec python3 "$here/../rashomon/rashomon.py" "$@"

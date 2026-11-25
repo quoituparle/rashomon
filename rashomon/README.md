@@ -3,7 +3,11 @@
 A memory-order judge for C++ concurrent code written by someone (or something) you don't want to have to read.
 The human reads the **spec**. The tool reads the code.
 
+This is the **reference**: how it works, why, and every quirk found along the way. To install and get started, read the [top-level README](../README.md) first.
+
 ```
+rashomon doctor                            # check the installation, print the fix for anything missing
+rashomon specs    [SPEC]                   # list the specs / show what one requires
 rashomon lint     impl.hpp [--spec SPEC]   # Rust rule: every atomic op states its ordering
 rashomon verify   impl.hpp --spec SPEC     # tool-owned scenarios, exhaustive under RC11
 rashomon minimize impl.hpp --spec SPEC     # weakest orderings that still verify
@@ -159,6 +163,8 @@ The MPMC history checker searches for one total order of all logged operations t
 **Vyukov's bounded MPMC queue fails `mpmc_queue` and passes `mpmc_queue_relaxed`, even with every ordering seq_cst.** A producer that has claimed a slot but not yet published it makes other threads see "full" or "empty". This is a design trade-off, not a memory-order bug. Choosing which contract you want is exactly the human's job.
 
 ## Requirements
+
+Step-by-step install: see the [top-level README](../README.md#install); `rashomon doctor` checks the result.
 
 GenMC (LLVM 19–22) and `clang++-19`. Override paths with `GENMC=…` and `CLANGXX=…`.
 On Ubuntu 24.04:

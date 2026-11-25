@@ -1,8 +1,8 @@
 {
   "verdict": "ADMITTED",
   "spec": "freelist",
-  "spec_digest": "9a94be6031834119b1c5e42866fd6e6c679c3b20353654bad239fb8dc481729a",
-  "admitted_at": "2026-11-24T19:55:02-0500",
+  "spec_digest": "89713fdd119d4b7608ec4c049e0f26d5d160709169dd2d545dde402829947e80",
+  "admitted_at": "2026-11-24T20:15:29-0500",
   "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.7",
   "memory_model": "RC11",
   "references": {

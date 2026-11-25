@@ -1,8 +1,8 @@
 {
   "verdict": "ADMITTED",
   "spec": "once",
-  "spec_digest": "28d862c6bb1f42c684d85924a2d8a51fe1d0327ac2e5f2914f12d1276932ea00",
-  "admitted_at": "2026-11-24T19:52:44-0500",
+  "spec_digest": "910a237ba0fa776fabbc3624309e90adf8dc1316f5e29f8b3d248c44fbafaf6f",
+  "admitted_at": "2026-11-24T20:13:09-0500",
   "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.7",
   "memory_model": "RC11",
   "references": {

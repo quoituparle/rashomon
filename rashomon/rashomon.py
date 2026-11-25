@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """rashomon — a memory-order judge for (AI-written) C++ concurrent code.
 
+    rashomon doctor                            check the installation, say exactly what to fix
+    rashomon specs    [SPEC]                   list the specs / show one spec's contract
     rashomon lint     impl.hpp                 Rust-style: every atomic op must state its ordering
     rashomon verify   impl.hpp --spec SPEC     tool-owned scenarios, exhaustively checked under RC11
     rashomon minimize impl.hpp --spec SPEC     find the weakest orderings that still verify
@@ -27,7 +29,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SPECS = HERE / "specs"
-GENMC = os.environ.get("GENMC", "/home/claude/genmc/build/bin/genmc")
+# GenMC: $GENMC, else `genmc` on PATH, else a source build in ~/genmc (the README's install steps)
+GENMC = os.environ.get("GENMC") or shutil.which("genmc") or str(Path.home() / "genmc" / "build" / "bin" / "genmc")
 GENMC_INCLUDE = os.environ.get("GENMC_INCLUDE", str(Path(GENMC).resolve().parents[2] / "lli" / "runtime-include" / "c"))
 MODEL = "--rc11"
 GENMC_COMPAT = HERE / "specs" / "_genmc_compat.h"  # declarations libstdc++ needs under GenMC
@@ -992,6 +995,8 @@ def cmd_verify(a) -> int:
         bad = next((r for r in results if r.verdict == "fail"), None)
         if bad and a.trace:
             print("\ncounterexample:\n" + bad.trace)
+        elif bad and bad.trace:
+            print("(run again with --trace to see the counterexample execution)")
     if a.cert:
         Path(a.cert).write_text(json.dumps(cert, indent=2))
     return {"PASS": 0, "FAIL": 1}.get(v, 3)
@@ -1634,6 +1639,147 @@ def cmd_admit(a) -> int:
     return 0 if verdict == "ADMITTED" else 1
 
 
+def _spec_names() -> list[str]:
+    return sorted(d.name for d in SPECS.iterdir() if (d / "spec.json").exists() and not d.name.startswith("_"))
+
+
+def cmd_specs(a) -> int:
+    if a.names:
+        print("\n".join(_spec_names()))
+        return 0
+    if not a.spec:
+        print("Specs (✓ = admitted on this machine). Show one with: rashomon specs NAME\n")
+        for n in _spec_names():
+            sp = load_spec(n)
+            contract = sp["contract"].split(";  ")[0].split("  ")[0]
+            print(f"  {'✓' if admission_status(sp)[0] else '✗'} {n:<20} {contract}")
+        return 0
+    sp = load_spec(a.spec)
+    ok, msg = admission_status(sp)
+    print(f"spec {a.spec}  ({'admitted' if ok else 'NOT admitted: ' + msg})\n")
+    print("What it checks:\n  " + sp["statement"] + "\n")
+    print("What you implement (put it in one header, e.g. impl.hpp):\n  " + sp["contract"] + "\n")
+    print("Scenarios (sizes are fixed by the spec, you cannot choose them):")
+    for sc in sp["scenarios"]:
+        print("  " + " ".join(f"{k}={v}" for k, v in sc.items()))
+    if sp.get("shrink_params"):
+        print(f"\nShrunk parameters: {', '.join(sp['shrink_params'])} must really be used by the implementation "
+              "(a tiny value in one scenario exposes wrap-around bugs).")
+    live = sp.get("liveness", "genmc")
+    print(f"\nLiveness: {'no thread may wait forever (checked)' if live == 'genmc' else 'every execution must be able to finish'}")
+    refs = [str((sp["_dir"] / r).relative_to(HERE)) for r in sp.get("references", [])]
+    if refs:
+        print("Reference implementations (correct, for comparison): " + ", ".join(refs))
+    print(f"\nCheck yours with:\n  rashomon verify impl.hpp --spec {a.spec}")
+    return 0
+
+
+_HEADER_PROBE = "#include <atomic>\n#include <cassert>\n#include <pthread.h>\nint main() {}\n"
+
+
+def _gcc_with_headers() -> str | None:
+    """A GCC install directory with which the compiler really compiles the probe (newest first)."""
+    cands = sorted(((int(d.name), str(d)) for d in Path("/usr/lib/gcc").glob("*/*") if d.name.isdigit()), reverse=True)
+    for _, d in cands:
+        r = subprocess.run([CLANGXX, "-std=c++20", f"--gcc-install-dir={d}", "-x", "c++", "-fsyntax-only", "-"],
+                           capture_output=True, text=True, input=_HEADER_PROBE)
+        if r.returncode == 0:
+            return d
+    return None
+
+
+def _litmus_smoke(judge: str, name: str, want: str) -> tuple[bool, RunResult]:
+    lit = HERE / "litmus"
+    spec = {"harness": lit / "_harness.cpp", "_name": "litmus", "_dir": lit, "liveness": "termination",
+            "scenarios": [{}]}
+    fn = run_scenario if judge == "genmc" else run_scenario_dartagnan
+    r = fn(lit / f"{name}.cpp", spec, {}, 120)
+    return r.verdict == want, r
+
+
+def cmd_doctor(a) -> int:
+    problems = 0
+
+    def good(msg):
+        print(f"  ✓ {msg}")
+
+    def bad(msg, fix):
+        nonlocal problems
+        problems += 1
+        print(f"  ✗ {msg}\n      fix: {fix}")
+
+    def note(msg):
+        print(f"  - {msg}")
+
+    print("Required")
+    if sys.version_info >= (3, 10):
+        good(f"Python {sys.version.split()[0]}")
+    else:
+        bad(f"Python {sys.version.split()[0]} is too old", "install Python 3.10 or newer")
+
+    headers_ok = False
+    if not (shutil.which(CLANGXX) or Path(CLANGXX).exists()):
+        bad(f"C++ compiler '{CLANGXX}' not found", "sudo apt install clang-19   (or set CLANGXX=/path/to/clang++)")
+    else:
+        ver = subprocess.run([CLANGXX, "--version"], capture_output=True, text=True).stdout.splitlines()[0]
+        good(f"compiler: {CLANGXX} ({ver})")
+        if "version 19" not in ver:
+            note("GenMC must be built against the same LLVM major as this compiler (the install steps use 19)")
+        r = subprocess.run([CLANGXX, *CXXSTD, "-x", "c++", "-fsyntax-only", "-"], capture_output=True, text=True,
+                           input=_HEADER_PROBE)
+        if r.returncode == 0:
+            headers_ok = True
+            good("C++ standard library headers found")
+        else:
+            gcc = _gcc_with_headers()
+            bad("the compiler cannot find the C++ standard library headers (<atomic>)",
+                f"export RASHOMON_CLANG_FLAGS=--gcc-install-dir={gcc}" if gcc
+                else "sudo apt install g++-14   (installs the libstdc++ headers)")
+
+    if not Path(GENMC).exists():
+        bad(f"GenMC not found (looked at $GENMC, PATH, {Path.home() / 'genmc/build/bin/genmc'})",
+            "build GenMC v0.20.0 as in the README's Install section, or set GENMC=/path/to/genmc")
+    else:
+        good(f"GenMC: {GENMC} ({_genmc_version()})")
+        if headers_ok:
+            p1, r1 = _litmus_smoke("genmc", "sb_seqcst", "pass")
+            p2, r2 = _litmus_smoke("genmc", "sb_relaxed", "fail")
+            if p1 and p2:
+                good("GenMC smoke test: a correct program PASSes, a weak-memory bug FAILs")
+            else:
+                bad(f"GenMC smoke test went wrong: {r1.verdict} / {r2.verdict}: {(r1.error or r2.error)[:200]}",
+                    "check that GenMC and the compiler use the same LLVM version, then run tools/litmus.py")
+
+    print("\nOptional: second judge (--second-judge dartagnan)")
+    if not shutil.which("java"):
+        note("java not found: install Java 25 to use Dartagnan")
+    elif not Path(DARTAGNAN_JAR).exists():
+        note(f"Dartagnan not found at {DARTAGNAN_JAR}: build Dat3M 4.5.0 and set DAT3M_HOME (see README)")
+    elif not headers_ok:
+        note("Dartagnan found; its smoke test is skipped until the compiler problem above is fixed")
+    else:
+        p1, r1 = _litmus_smoke("dartagnan", "sb_seqcst", "pass")
+        p2, r2 = _litmus_smoke("dartagnan", "mp_relaxed", "fail")
+        if p1 and p2:
+            good(f"Dartagnan: {_dartagnan_version()}, smoke test passed")
+        else:
+            bad(f"Dartagnan smoke test went wrong: {r1.verdict} / {r2.verdict}: {(r1.error or r2.error)[:200]}",
+                "run tools/litmus.py --judges dartagnan for details")
+
+    print("\nSpecs")
+    names = _spec_names()
+    stale = [n for n in names if not admission_status(load_spec(n))[0]]
+    if not stale:
+        good(f"all {len(names)} specs admitted on this machine")
+    else:
+        bad(f"{len(stale)} of {len(names)} specs are not admitted here (normal on a new machine or GenMC version)",
+            'for s in $(rashomon specs --names); do rashomon admit "$s"; done    # 5-10 minutes')
+
+    print("\n" + ("Everything needed is in place." if not problems else
+                  f"{problems} problem(s). Fix them in order and run `rashomon doctor` again."))
+    return 1 if problems else 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="rashomon", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1698,6 +1844,14 @@ def main(argv=None) -> int:
 
     ps = sub.add_parser("status", help="show which specs are admitted and still unchanged")
     ps.set_defaults(fn=cmd_status)
+
+    pd = sub.add_parser("doctor", help="check the installation and say exactly what to fix")
+    pd.set_defaults(fn=cmd_doctor)
+
+    pz = sub.add_parser("specs", help="list the specs, or show what one requires (statement, contract, scenarios)")
+    pz.add_argument("spec", nargs="?")
+    pz.add_argument("--names", action="store_true", help="print only the spec names (for scripts)")
+    pz.set_defaults(fn=cmd_specs)
 
     pa = sub.add_parser("admit", help="admit a spec: its scenarios must kill every non-equivalent mutant of its references")
     pa.add_argument("spec")

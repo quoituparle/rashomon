@@ -1,8 +1,8 @@
 {
   "verdict": "ADMITTED",
   "spec": "mutex",
-  "spec_digest": "c520732e4b6755e830ab885eae16b38a85b7b63ad0f22a3b3fa1ed0ac8dad605",
-  "admitted_at": "2026-11-24T19:52:16-0500",
+  "spec_digest": "d2e2bf3fb5a57ee73e47d6f844fed5f9fc0f3775ffd0faedbed5694033ebe586",
+  "admitted_at": "2026-11-24T20:12:43-0500",
   "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.7",
   "memory_model": "RC11",
   "references": {

@@ -1,8 +1,8 @@
 {
   "verdict": "ADMITTED",
   "spec": "seqlock",
-  "spec_digest": "2e55b716b41dc6e3782809411f7947abe65ee23d76622ac939f11b287806ebed",
-  "admitted_at": "2026-11-24T19:52:25-0500",
+  "spec_digest": "0d0959147e30137447f6eb712702c85a0de9f71d0d5a0bd7dcb1302b5b09ca66",
+  "admitted_at": "2026-11-24T20:12:51-0500",
   "checker": "GenMC v0.20.0 (commit #fab5bba) / LLVM 19.1.7",
   "memory_model": "RC11",
   "references": {
